@@ -608,7 +608,7 @@ const PIPE = (() => {
     };
   }
 
-  return {process, svcOf, deriveCaps, normName, matchName, isRemoteMIT, splitCPOther, SVC_ORDER};
+  return {process, svcOf, deriveCaps, normName, matchName, isRemoteMIT, splitCPOther, SVC_ORDER, buildIndex, matchSite, blocked};
 })();
 if(typeof module!=='undefined') module.exports=PIPE;
 </script>
@@ -771,13 +771,14 @@ function nis2Status(m){
 function nis2Pct(m){const s=nis2Status(m).filter(a=>!a.org);let v=0;s.forEach(a=>{if(a.state==='met')v++;else if(a.state==='part')v+=.5;});return v/s.length;}
 
 /* ============ binding ============ */
-let M,C,S,P,META,NM,NC,cI,metaByC,recEqM,lastFullIdx,hasAttrs,hasData,BRANCH,brByMaster;
+let M,C,S,P,META,NM,NC,NC0,cI,metaByC,recEqM,lastFullIdx,hasAttrs,hasData,BRANCH,brByMaster;
 function bindData(){
   hasData=!!(DATA&&DATA.rows&&DATA.rows.length);
   if(!hasData){document.getElementById('gen').textContent='No data — open Data Hub';return;}
   applyRenames();
-  M=DATA.months;C=DATA.clients;S=DATA.svcs;P=DATA.prods;META=DATA.meta;NM=M.length;NC=C.length;
+  M=DATA.months;C=DATA.clients.slice();S=DATA.svcs;P=DATA.prods;META=DATA.meta.slice();NM=M.length;NC=C.length;NC0=NC;
   cI={};C.forEach((c,i)=>cI[c]=i); metaByC={};META.forEach(m=>metaByC[m.n]=m);
+  META.forEach(m=>{ m.ownerFinal=m.owner||''; if(m.crm)delete m.crm; if(m.migrating)delete m.migrating; });
   lastFullIdx=DATA.lastFull?M.indexOf(DATA.lastFull):NM-1; if(lastFullIdx<0)lastFullIdx=NM-1;
   recEqM=Array.from({length:NC},()=>new Float64Array(NM));
   for(const [c,m,v] of DATA.recEq) recEqM[c][m]=v;
@@ -785,7 +786,8 @@ function bindData(){
   BRANCH.forEach(b=>(brByMaster[b.m]=brByMaster[b.m]||[]).push(b));
   hasAttrs=!!DATA.hasAttrs||META.some(m=>m.win10!==undefined||m.score!==undefined);
   state.m0=Math.max(0,lastFullIdx-11);state.m1=lastFullIdx;
-  document.getElementById('gen').textContent='Loaded · to '+(DATA.maxDate||M[NM-1]);
+  mergeCRM();
+  document.getElementById('gen').textContent='Loaded · to '+(DATA.maxDate||M[NM-1])+(hasCrm()?' · CRM linked':'');
 }
 const state={sel:null,owner:'',m0:0,m1:0,cmp:'none',page:'exec',c360:null};
 /* Clients that have changed trading name since the ERP data was cut. Renaming here keeps one
@@ -801,7 +803,7 @@ function applyRenames(){
   }
 }
 
-function ownerOf(n){if(OWNER_OVR[n])return OWNER_OVR[n];const m=metaByC[n];return (m&&m.owner)||'Unassigned';}
+function ownerOf(n){if(OWNER_OVR[n])return OWNER_OVR[n];const m=metaByC[n];return (m&&(m.ownerFinal||m.owner))||'Unassigned';}
 function filteredClients(){let x=[...Array(NC).keys()];if(state.owner)x=x.filter(i=>ownerOf(C[i])===state.owner);if(state.sel&&state.sel.size)x=x.filter(i=>state.sel.has(i));return x;}
 function idxSetOrNull(){const f=filteredClients();return f.length===NC?null:new Set(f);}
 function filteredMeta(){return filteredClients().map(i=>metaByC[C[i]]).filter(Boolean);}
@@ -927,13 +929,14 @@ const PAGES=[
  ['cyber','CyberProtect Radar','M10 2l7 3v5c0 5-3.5 7.5-7 8-3.5-.5-7-3-7-8V5z',0,'sub'],
  ['nis2','NIS2 Compliance','M6 2h8l2 3v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5z M8 9h4M8 12h4',0,'sub'],
  ['win10','Windows 10 Risk','M3 5l6-1v6H3zM10 4l7-1v7h-7zM3 11h6v6l-6-1zM10 11h7v7l-7-1',0,'sub'],
+ ['recon','Account Reconciliation','M4 7h11M4 7l3-3M4 7l3 3M16 13H5M16 13l-3-3M16 13l-3 3',6],
  ['pending','Pending Migration','M4 10h12M12 6l4 4-4 4',4],
  ['data','Data Hub','M10 3c3.9 0 7 1 7 2.5S13.9 8 10 8 3 7 3 5.5 6.1 3 10 3zM3 5.5v9c0 1.5 3.1 2.5 7 2.5s7-1 7-2.5v-9',4],
 ];
-const SECT={0:'',1:'Analysis',5:'Sales tools',2:'Drill-down',3:'Cyber posture',4:'Coming across'};
+const SECT={0:'',1:'Analysis',5:'Sales tools',2:'Drill-down',3:'Cyber posture',6:'CRM',4:'Coming across'};
 function buildNav(){
   document.getElementById('nav').innerHTML=PAGES.map(p=>{const[id,label,path,sect,sub]=p;
-    const locked=(!hasData&&id!=='data'&&id!=='pkg')||(id==='win10'&&hasData&&!hasAttrs)||(id==='pending'&&hasData&&!((DATA.pending||[]).length));
+    const locked=(!hasData&&id!=='data'&&id!=='pkg')||(id==='win10'&&hasData&&!hasAttrs)||(id==='pending'&&hasData&&!((DATA.pending||[]).length))||(id==='recon'&&!hasCrm());
     return (SECT[sect]?`<div class="sep">${SECT[sect]}</div>`:'')+
     `<button data-p="${id}" class="${sub?'sub':''} ${locked?'locked':''}"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="${path}"/></svg><span>${label}</span></button>`;}).join('');
 }
@@ -2150,37 +2153,42 @@ function pkgProposal(){
 }
 /* ===== ACCOUNT MANAGER SCORECARD ===== */
 function renderAm(){
-  const metas=META.filter(isActive);
+  const roster=META.filter(m=>isActive(m)||m.migrating);
   const by={};
-  metas.forEach(m=>{const o=ownerOf(m.n);(by[o]=by[o]||[]).push(m);});
+  roster.forEach(m=>{const o=ownerOf(m.n);(by[o]=by[o]||[]).push(m);});
   const rows=Object.entries(by).map(([o,ms])=>{
-    const mrr=ms.reduce((a,m)=>a+totMRR(m),0);
-    const opp=ms.reduce((a,m)=>a+oppTotal(m),0);
-    const post=ms.reduce((a,m)=>a+postureScore(m),0)/ms.length;
-    const nis=ms.reduce((a,m)=>a+nis2Pct(m),0)/ms.length;
-    const risk=ms.filter(m=>riskScore(m).level==='High').length;
-    const cpNone=ms.filter(m=>m.cp.endpoint==='None').length;
-    return {o,n:ms.length,mrr,opp,post,nis,risk,cpNone,
-      dev:ms.reduce((a,m)=>a+m.dev,0),seats:ms.reduce((a,m)=>a+m.seats,0),avg:mrr/ms.length};
+    const bill=ms.filter(isActive);
+    const mrr=bill.reduce((a,m)=>a+totMRR(m),0);
+    const opp=bill.reduce((a,m)=>a+oppTotal(m),0);
+    const post=bill.length?bill.reduce((a,m)=>a+postureScore(m),0)/bill.length:0;
+    const nis=bill.length?bill.reduce((a,m)=>a+nis2Pct(m),0)/bill.length:0;
+    const risk=bill.filter(m=>riskScore(m).level==='High').length;
+    const cpNone=bill.filter(m=>m.cp.endpoint==='None').length;
+    const mig=ms.filter(m=>m.migrating).length;
+    const mism=ms.filter(m=>m.crm&&m.crm.mismatch).length;
+    return {o,n:ms.length,bill:bill.length,mig,mism,mrr,opp,post,nis,risk,cpNone,
+      dev:bill.reduce((a,m)=>a+m.dev,0),seats:bill.reduce((a,m)=>a+m.seats,0),avg:bill.length?mrr/bill.length:0};
   }).sort((a,b)=>b.mrr-a.mrr);
   const tot=rows.reduce((a,r)=>a+r.mrr,0), totOpp=rows.reduce((a,r)=>a+r.opp,0);
+  const totMig=rows.reduce((a,r)=>a+r.mig,0), totMism=rows.reduce((a,r)=>a+r.mism,0);
   document.getElementById('pg-am').innerHTML=`
   <h1 class="ph">Account <em>Managers</em></h1>
-  <p class="psub">Book size, quality and open pipeline by owner. Posture and NIS2 are the averages across each book, which makes them a fair read on how well protected a portfolio is rather than a judgement on any one client. Ownership comes from the workbook and can be corrected in Settings.</p>
+  <p class="psub">Book size, quality and open pipeline by owner. ${hasCrm()?'Ownership is taken from the Nimble account tags where NetSuite is blank, so the acquired books now appear under their managers, with migrating clients counted separately until their billing lands. ':'Ownership comes from the workbook. '}Posture, NIS2 and financials are measured across billing clients only, so migrating accounts do not distort the averages. Conflicts are resolved on the Account Reconciliation screen.</p>
   <div class="grid cards">
     <div class="card"><div class="k">Managed MRR</div><div class="v">${fmtEk(tot)}</div><div class="s">across ${rows.length} owners</div></div>
     <div class="card hl"><div class="k">Open pipeline</div><div class="v">${fmtEk(totOpp)}/mo</div><div class="s">${fmtEk(totOpp*12)} a year</div></div>
     <div class="card"><div class="k">Largest book</div><div class="v">${rows.length?fmtEk(rows[0].mrr):'—'}</div><div class="s">${rows.length?esc(rows[0].o):''}</div></div>
     <div class="card"><div class="k">High risk clients</div><div class="v ${rows.reduce((a,r)=>a+r.risk,0)?'warn':''}">${rows.reduce((a,r)=>a+r.risk,0)}</div><div class="s">across all books</div></div>
+    ${hasCrm()?`<div class="card"><div class="k">Migrating in</div><div class="v">${totMig}</div><div class="s">acquired, revenue pending</div></div>${totMism?`<div class="card hl" style="cursor:pointer" onclick="go('recon')"><div class="k">Manager conflicts</div><div class="v warn">${totMism}</div><div class="s">resolve →</div></div>`:''}`:''}
   </div>
   <div class="two">
     <div class="panel"><h3>Book size by owner</h3><div class="chartbox"><canvas id="chAmMrr"></canvas></div></div>
     <div class="panel"><h3>Open pipeline by owner</h3><div class="chartbox"><canvas id="chAmOpp"></canvas></div></div>
   </div>
   <div class="panel"><h3>Scorecard</h3><div class="hint">Click an owner to filter the whole dashboard to their book.</div>
-  <div class="twrap"><table><thead><tr><th>Owner</th><th class="num">Clients</th><th class="num">MRR</th><th class="num">Average client</th><th class="num">Devices</th><th class="num">Seats</th><th>Avg posture</th><th class="num">NIS2</th><th class="num">No endpoint</th><th class="num">At risk</th><th class="num">Pipeline</th></tr></thead><tbody>
+  <div class="twrap"><table><thead><tr><th>Owner</th><th class="num">Clients</th><th class="num">Migrating</th><th class="num">MRR</th><th class="num">Average client</th><th class="num">Devices</th><th class="num">Seats</th><th>Avg posture</th><th class="num">NIS2</th><th class="num">No endpoint</th><th class="num">At risk</th><th class="num">Pipeline</th></tr></thead><tbody>
   ${rows.map(r=>{const col=r.post<.3?'#e5484d':r.post<.5?'#f28c3b':r.post<.75?'#f9c20d':'#2fbf71';
-    return `<tr><td class="clink" onclick="filterOwner('${jsq(r.o)}')">${esc(r.o)}</td><td class="num">${r.n}</td><td class="num">${fmtE(r.mrr)}</td><td class="num">${fmtE(r.avg)}</td>
+    return `<tr><td class="clink" onclick="filterOwner('${jsq(r.o)}')">${esc(r.o)}${r.mism?` <span class="tag r" title="manager conflict">!</span>`:''}</td><td class="num">${r.n}</td><td class="num">${r.mig?`<span class="warn">${r.mig}</span>`:'—'}</td><td class="num">${fmtE(r.mrr)}</td><td class="num">${fmtE(r.avg)}</td>
     <td class="num">${r.dev.toLocaleString()}</td><td class="num">${r.seats.toLocaleString()}</td>
     <td><span class="scorebar" style="width:70px"><i style="width:${Math.round(r.post*100)}%;background:${col}"></i></span>${Math.round(r.post*100)}%</td>
     <td class="num">${Math.round(r.nis*100)}%</td><td class="num ${r.cpNone?'warn':''}">${r.cpNone}</td><td class="num ${r.risk?'neg':''}">${r.risk}</td><td class="num warn">${fmtE(r.opp)}</td></tr>`;}).join('')}
@@ -2296,7 +2304,143 @@ function renderPending(){
 }
 
 /* ============ BOOT ============ */
-const RENDER={exec:renderExec,radar:renderRadar,fin:renderFin,kpi:renderKpi,c360:renderC360,price:renderPrice,gap:renderGap,m365:renderM365,posture:renderPosture,cyber:renderCyber,nis2:renderNis2,win10:renderWin10,pkg:renderPkg,am:renderAm,health:renderHealth,pending:renderPending,data:renderData};
+const RENDER={exec:renderExec,radar:renderRadar,fin:renderFin,kpi:renderKpi,c360:renderC360,price:renderPrice,gap:renderGap,m365:renderM365,posture:renderPosture,cyber:renderCyber,nis2:renderNis2,win10:renderWin10,pkg:renderPkg,am:renderAm,health:renderHealth,recon:renderRecon,pending:renderPending,data:renderData};
+
+/* ================= CRM (Nimble) merge layer ================= */
+const AM_ROSTER={DF:'David Flood',DG:'David Groark',DMcD:'David McDonald',DOC:"Derek O'Callaghan",EB:'Emil Badea',EJ:'Eoghan Johnson',SC:'Simon Collins',MD:'Michael Daly'};
+const AM_ALIASES={'emil bidea':'Emil Badea','emil badea':'Emil Badea','derek ocallaghan':"Derek O'Callaghan"};
+function canonAM(n){ if(!n)return ''; const k=String(n).toLowerCase().replace(/[^a-z' ]/g,'').replace(/\s+/g,' ').trim(); return AM_ALIASES[k]||n; }
+function reconcileAM(ns,crm,ovr){ ns=canonAM(ns); crm=canonAM(crm);
+  if(ovr) return {am:canonAM(ovr),source:'corrected',mismatch:false};
+  if(ns&&crm&&ns!==crm) return {am:ns,source:'netsuite',mismatch:true,crmSays:crm};
+  if(ns) return {am:ns,source:'netsuite',mismatch:false};
+  if(crm) return {am:crm,source:'crm',mismatch:false};
+  return {am:'Unassigned',source:'none',mismatch:false}; }
+function crmStatusOf(active,hasRevenue){ if(active) return hasRevenue?'billing':'migrating'; return hasRevenue?'untagged':'prospect'; }
+
+let CRM_XWALK={}, CRM_OVR={}, CRM=null;
+try{ const a=localStorage.getItem('itie3_crm_xwalk'); if(a)CRM_XWALK=JSON.parse(a); }catch(e){}
+try{ const a=localStorage.getItem('itie3_crm_ovr'); if(a)CRM_OVR=JSON.parse(a); }catch(e){}
+function saveXwalk(){ try{localStorage.setItem('itie3_crm_xwalk',JSON.stringify(CRM_XWALK));}catch(e){} }
+function saveCrmOvr(){ try{localStorage.setItem('itie3_crm_ovr',JSON.stringify(CRM_OVR));}catch(e){} }
+
+function crmFeed(){ for(const k of Object.keys(SOURCE_DATA)){ const d=SOURCE_DATA[k]&&SOURCE_DATA[k].data; if(d&&Array.isArray(d.accounts)) return d; } return null; }
+function hasCrm(){ return !!crmFeed(); }
+
+function blankMeta(nm,acc){
+  return { n:nm, br:[], dev:0, seats:0, tier:'', mrr:{}, ttmR:0, ttmN:0, first:'', last:'',
+    caps:[], cp:{endpoint:'None',user:'None',avStd:false,socStd:false}, m365:{}, owner:'',
+    ownerFinal:canonAM(acc.am)||'Unassigned', migrating:true,
+    crm:{tags:acc.tags||[],active:true,dormant:false,crmAm:acc.am||'',crmId:acc.crmId,status:'migrating',mismatch:false} };
+}
+
+/* Join the CRM feed to the NetSuite client model.
+   - a tag names the manager; NetSuite wins on conflict, CRM fills blanks
+   - tagged active accounts with no NetSuite match become migrating clients (acquired co.)
+   - confident name matches auto-link; plausible ones go to the reconciliation queue */
+function mergeCRM(){
+  CRM=null;
+  const feed=crmFeed(); if(!feed||!hasData) return;
+  const baseNames=C.slice(0,NC0);
+  const ix=PIPE.buildIndex(baseNames);
+  const review=[], mismatches=[], migrating=[], untagged=[];
+  const attach={};
+  for(const acc of (feed.accounts||[])){
+    const nm=(acc.name||'').trim(); if(!nm) continue;
+    let client=CRM_XWALK[nm]||null; if(client==='__migrating__'){ if(acc.active)migrating.push(acc); continue; }
+    if(client&&cI[client]===undefined) client=null;
+    if(!client){
+      const m=PIPE.matchSite(nm, ix);
+      if(m.name && !PIPE.blocked(nm,m.name)){
+        if(m.score>=0.999) client=m.name;
+        else if(m.score>=0.5 && acc.active){ review.push({crmName:nm,suggest:m.name,score:m.score,crmAm:acc.am,tags:acc.tags||[]}); continue; }
+      }
+    }
+    if(client){ attach[client]={tags:acc.tags||[],active:!!acc.active,dormant:!!acc.dormant,crmAm:acc.am||'',crmId:acc.crmId,crmName:nm}; }
+    else if(acc.active){ migrating.push(acc); }
+  }
+  // apply to base NetSuite clients
+  for(let i=0;i<NC0;i++){
+    const m=META[i]; const a=attach[m.n];
+    const crmAm=a?a.crmAm:'', active=a?a.active:false, dormant=a?a.dormant:false;
+    const rec=reconcileAM(m.owner||'', crmAm, CRM_OVR[m.n]);
+    m.ownerFinal=rec.am;
+    m.crm={ tags:a?a.tags:[], active, dormant, crmAm, crmId:a?a.crmId:null,
+            status:crmStatusOf(active,true), mismatch:rec.mismatch, crmSays:rec.crmSays||'', crmName:a?a.crmName:'' };
+    if(rec.mismatch) mismatches.push({client:m.n, netsuite:canonAM(m.owner||''), crm:rec.crmSays});
+    if(!a && totMRR(m)>50) untagged.push(m.n);
+  }
+  // add migrating clients (tagged, acquired, no NetSuite revenue yet)
+  for(const acc of migrating){
+    const nm=(acc.name||'').trim();
+    if(!nm||cI[nm]!==undefined) continue;
+    const m=blankMeta(nm,acc);
+    META.push(m); C.push(nm); cI[nm]=C.length-1; metaByC[nm]=m;
+  }
+  NC=C.length;
+  while(recEqM.length<NC) recEqM.push(new Float64Array(NM));
+  CRM={ accounts:(feed.accounts||[]).length, activeAccounts:(feed.accounts||[]).filter(a=>a.active).length,
+        matched:Object.keys(attach).length, review, mismatches,
+        migrating:migrating.map(a=>({name:a.name,am:canonAM(a.am),tags:a.tags||[]})), untagged,
+        loadedAt:(function(){for(const k of Object.keys(SOURCE_DATA)){const d=SOURCE_DATA[k];if(d&&d.data&&Array.isArray(d.data.accounts))return d.loadedAt;}return '';})() };
+}
+
+/* save a name decision from the reconciliation screen, then re-merge live */
+function crmAssign(crmName, clientName){
+  if(clientName==='__migrating__') CRM_XWALK[crmName]='__migrating__';
+  else if(clientName) CRM_XWALK[crmName]=clientName;
+  else delete CRM_XWALK[crmName];
+  saveXwalk(); bindData(); rebuildOwnerFilter(); if(state.page==='recon')renderRecon(); else refresh();
+}
+function crmSetOwner(client, owner){
+  if(owner) CRM_OVR[client]=owner; else delete CRM_OVR[client];
+  saveCrmOvr(); bindData(); rebuildOwnerFilter(); if(state.page==='recon')renderRecon(); else refresh();
+}
+
+/* ================= Reconciliation page ================= */
+function renderRecon(){
+  if(!hasCrm()||!CRM){ document.getElementById('pg-recon').innerHTML='<div class="lockmsg"><div class="big">🔗</div><h2>No CRM feed loaded</h2><p>Connect Nimble on the Data Hub, then this screen lets you clear the few account matches and manager conflicts once, and the decisions stick.</p><button class="btn" style="margin-top:16px" onclick="go(\'data\')">Open the Data Hub</button></div>'; return; }
+  const clientOpts=[...C].sort((a,b)=>a.localeCompare(b));
+  const optList=(sel)=>clientOpts.map(c=>`<option value="${esc(c)}"${c===sel?' selected':''}>${esc(c)}</option>`).join('');
+  document.getElementById('pg-recon').innerHTML=`
+  <h1 class="ph">Account <em>Reconciliation</em></h1>
+  <p class="psub">Where Nimble and NetSuite see the same client differently. Confident name matches are already linked automatically; this screen is for the handful that need a human eye, plus any manager conflicts. Every decision here is saved, so it never comes back. NetSuite wins on ownership by default, and your correction wins over both.</p>
+  <div class="grid cards">
+    <div class="card"><div class="k">CRM accounts</div><div class="v">${CRM.accounts.toLocaleString()}</div><div class="s">${CRM.activeAccounts} tagged active</div></div>
+    <div class="card"><div class="k">Auto-linked</div><div class="v pos">${CRM.matched}</div><div class="s">to a NetSuite client</div></div>
+    <div class="card ${CRM.review.length?'hl':''}"><div class="k">Need a decision</div><div class="v ${CRM.review.length?'warn':''}">${CRM.review.length}</div><div class="s">plausible, unconfirmed</div></div>
+    <div class="card ${CRM.mismatches.length?'hl':''}"><div class="k">Manager conflicts</div><div class="v ${CRM.mismatches.length?'warn':''}">${CRM.mismatches.length}</div><div class="s">NetSuite vs CRM</div></div>
+    <div class="card"><div class="k">Migrating in</div><div class="v">${CRM.migrating.length}</div><div class="s">acquired, revenue pending</div></div>
+  </div>
+
+  <div class="panel"><h3>Name matches to confirm</h3><div class="hint">A CRM account that looks like a NetSuite client but not certainly. Confirm the match, pick the right client, or mark it as a migrating account that has no NetSuite billing yet.</div>
+  ${CRM.review.length?`<div class="twrap"><table><thead><tr><th>CRM account</th><th>Manager</th><th>Best guess</th><th class="num">Confidence</th><th>Decision</th></tr></thead><tbody>
+  ${CRM.review.map(r=>`<tr><td>${esc(r.crmName)}</td><td>${esc(r.crmAm||'—')}</td><td>${esc(r.suggest)}</td><td class="num">${Math.round(r.score*100)}%</td>
+    <td><select onchange="crmAssign('${jsq(r.crmName)}',this.value)"><option value="">Choose…</option><option value="${esc(r.suggest)}">Link to ${esc(r.suggest)}</option><option value="__migrating__">It is a migrating account</option><optgroup label="Or another client">${optList('')}</optgroup></select></td></tr>`).join('')}
+  </tbody></table></div>`:'<div class="hint">Nothing waiting. Every CRM account is either linked or recorded as migrating.</div>'}
+  </div>
+
+  <div class="panel"><h3>Manager conflicts</h3><div class="hint">NetSuite and the CRM tag name a different owner for the same client. NetSuite is used unless you choose otherwise here.</div>
+  ${CRM.mismatches.length?`<div class="twrap"><table><thead><tr><th>Client</th><th>NetSuite says</th><th>CRM tag says</th><th>Use</th></tr></thead><tbody>
+  ${CRM.mismatches.map(m=>`<tr><td class="clink" onclick="goClient('${jsq(m.client)}')">${esc(m.client)}</td><td>${esc(m.netsuite)}</td><td>${esc(m.crm)}</td>
+    <td><select onchange="crmSetOwner('${jsq(m.client)}',this.value)"><option value="">NetSuite (${esc(m.netsuite)})</option><option value="${esc(m.crm)}">CRM (${esc(m.crm)})</option></select></td></tr>`).join('')}
+  </tbody></table></div>`:'<div class="hint">No conflicts. Where both systems name a manager, they agree.</div>'}
+  </div>
+
+  <div class="two">
+    <div class="panel"><h3>Migrating in from the acquisition</h3><div class="hint">Tagged active in Nimble, no NetSuite billing yet. Recorded now under their manager, and they flip to billing automatically when their revenue lands.</div>
+    ${CRM.migrating.length?`<div class="twrap" style="max-height:360px"><table><thead><tr><th>Client</th><th>Manager</th></tr></thead><tbody>
+    ${CRM.migrating.slice().sort((a,b)=>a.am.localeCompare(b.am)).map(m=>`<tr><td class="clink" onclick="goClient('${jsq(m.name)}')">${esc(m.name)}</td><td>${esc(m.am||'—')}</td></tr>`).join('')}
+    </tbody></table></div>`:'<div class="hint">None.</div>'}
+    </div>
+    <div class="panel"><h3>Billing but not tagged in Nimble</h3><div class="hint">These bill in NetSuite but carry no active account tag in the CRM. Either a client missing its tag, or something to tidy in Nimble.</div>
+    ${CRM.untagged.length?`<div class="twrap" style="max-height:360px"><table><thead><tr><th>Client</th><th class="num">MRR</th><th>Owner</th></tr></thead><tbody>
+    ${CRM.untagged.map(n=>metaByC[n]).filter(Boolean).sort((a,b)=>totMRR(b)-totMRR(a)).slice(0,60).map(m=>`<tr><td class="clink" onclick="goClient('${jsq(m.n)}')">${esc(m.n)}</td><td class="num">${fmtE(totMRR(m))}</td><td>${esc(ownerOf(m.n))}</td></tr>`).join('')}
+    </tbody></table></div>`:'<div class="hint">Every billing client carries a CRM tag.</div>'}
+    </div>
+  </div>`;
+}
+
 function refresh(){if(!hasData&&state.page!=='pkg'){renderData();return;}RENDER[state.page]();}
 bindData();buildNav();
 if(hasData){
@@ -2305,10 +2449,10 @@ if(hasData){
   go('data');
   buildDataset({source:'feed',silent:true}).then(ok=>{ if(ok) go('exec'); });
 }
-getSources().filter(s=>s.role!=='primary').forEach(s=>{
+Promise.all(getSources().filter(s=>s.role!=='primary').map(s=>
   fetch(s.url,{credentials:'include',cache:'no-store'}).then(r=>r.ok?r.json():null).then(json=>{
-    if(json){ SOURCE_DATA[s.id]={data:json,loadedAt:new Date().toISOString()}; saveSourceData(); }
-  }).catch(()=>{});
-});
+    if(json){ SOURCE_DATA[s.id]={data:json,loadedAt:new Date().toISOString()}; saveSourceData(); return true; }
+  }).catch(()=>{})
+)).then(res=>{ if(res.some(Boolean)&&hasData){ bindData(); buildNav(); rebuildOwnerFilter(); refresh(); } });
 </script>
 </body></html>

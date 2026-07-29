@@ -140,6 +140,13 @@ tr:hover td{background:rgba(0,160,216,.06)}
 .stab button{background:var(--panel2);border:1px solid var(--line);color:var(--mut);border-radius:8px;padding:6px 13px;font-size:12.5px;cursor:pointer}
 .stab button.on{background:var(--blue);border-color:var(--blue);color:#fff}
 .modal.wide{width:min(940px,96vw)}
+
+.srcbadge-wrap{display:flex;flex-direction:column;gap:5px;margin-top:9px}
+.srcbadge-wrap .sb{display:flex;align-items:center;gap:7px;font-size:11px;line-height:1.3}
+.srcbadge-wrap .dotc{width:8px;height:8px;border-radius:50%;flex:none}
+.srcbadge-wrap .on{background:#2fbf71}.srcbadge-wrap .off{background:#5f6f92}.srcbadge-wrap .warn{background:#f9c20d}
+.srcbadge-wrap .sb b{color:#cdd8ee;font-weight:600}
+.srcbadge-wrap .sb small{color:var(--mut2);display:block;font-size:10px}
 </style>
 </head>
 <body>
@@ -152,6 +159,7 @@ tr:hover td{background:rgba(0,160,216,.06)}
       <button class="pri" onclick="openReport()">⭳ Export report</button>
       <button onclick="openSettings()">⚙ Settings, rates &amp; services</button>
       <span id="gen">No data loaded</span>
+      <div id="srcbadge" class="srcbadge-wrap"></div>
     </div>
   </aside>
   <main class="main">
@@ -787,7 +795,8 @@ function bindData(){
   hasAttrs=!!DATA.hasAttrs||META.some(m=>m.win10!==undefined||m.score!==undefined);
   state.m0=Math.max(0,lastFullIdx-11);state.m1=lastFullIdx;
   mergeCRM();
-  document.getElementById('gen').textContent='Loaded · to '+(DATA.maxDate||M[NM-1])+(hasCrm()?' · CRM linked':'');
+  document.getElementById('gen').textContent='Loaded · to '+(DATA.maxDate||M[NM-1]);
+  renderSourceBadge();
 }
 const state={sel:null,owner:'',m0:0,m1:0,cmp:'none',page:'exec',c360:null};
 /* Clients that have changed trading name since the ERP data was cut. Renaming here keeps one
@@ -2397,6 +2406,23 @@ function crmSetOwner(client, owner){
   saveCrmOvr(); bindData(); rebuildOwnerFilter(); if(state.page==='recon')renderRecon(); else refresh();
 }
 
+/* source-of-truth badge: states plainly where each part of the picture comes from */
+function renderSourceBadge(){
+  const el=document.getElementById('srcbadge'); if(!el) return;
+  if(!hasData){ el.innerHTML=''; return; }
+  const nsLabel = (DATA.source==='workbook'||!DATA.source) ? 'workbook upload' : 'API sync';
+  const feed=crmFeed();
+  let crm;
+  if(feed){
+    const linked=CRM?CRM.matched:0, acc=CRM?CRM.accounts:(feed.accounts||[]).length;
+    const when=CRM&&CRM.loadedAt?(' · '+new Date(CRM.loadedAt).toLocaleString('en-IE',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'short'})):'';
+    crm=`<div class="sb"><span class="dotc on"></span><span><b>CRM: Nimble linked</b><small>${linked} of ${acc} accounts matched${when}</small></span></div>`;
+  } else {
+    crm=`<div class="sb"><span class="dotc off"></span><span><b>CRM: not connected</b><small>owners come from NetSuite only</small></span></div>`;
+  }
+  el.innerHTML=`<div class="sb"><span class="dotc on"></span><span><b>NetSuite: ${nsLabel}</b><small>${NC0} clients · to ${esc(DATA.maxDate||'')}</small></span></div>${crm}`;
+}
+
 /* ================= Reconciliation page ================= */
 function renderRecon(){
   if(!hasCrm()||!CRM){ document.getElementById('pg-recon').innerHTML='<div class="lockmsg"><div class="big">🔗</div><h2>No CRM feed loaded</h2><p>Connect Nimble on the Data Hub, then this screen lets you clear the few account matches and manager conflicts once, and the decisions stick.</p><button class="btn" style="margin-top:16px" onclick="go(\'data\')">Open the Data Hub</button></div>'; return; }
@@ -2453,6 +2479,6 @@ Promise.all(getSources().filter(s=>s.role!=='primary').map(s=>
   fetch(s.url,{credentials:'include',cache:'no-store'}).then(r=>r.ok?r.json():null).then(json=>{
     if(json){ SOURCE_DATA[s.id]={data:json,loadedAt:new Date().toISOString()}; saveSourceData(); return true; }
   }).catch(()=>{})
-)).then(res=>{ if(res.some(Boolean)&&hasData){ bindData(); buildNav(); rebuildOwnerFilter(); refresh(); } });
+)).then(res=>{ if(res.some(Boolean)&&hasData){ bindData(); buildNav(); rebuildOwnerFilter(); refresh(); } renderSourceBadge(); });
 </script>
 </body></html>
