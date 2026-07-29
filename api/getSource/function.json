@@ -6,12 +6,8 @@
       "direction": "in",
       "name": "req",
       "methods": ["get"],
-      "route": "getSource/{name}"
+      "route": "getSource/{id}"
     },
-    {
-      "type": "http",
-      "direction": "out",
-      "name": "res"
-    }
+    { "type": "http", "direction": "out", "name": "res" }
   ]
 }

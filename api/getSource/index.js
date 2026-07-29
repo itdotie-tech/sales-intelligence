@@ -1,76 +1,37 @@
-const { BlobServiceClient } = require("@azure/storage-blob");
-
-// One function, any number of sources. Each source is just a JSON file in
-// the same private container, named after its source id — e.g. a source
-// with id "crm" reads blob "crm.json". Power Automate (or any other sync
-// job) writes one blob per source on its own schedule; this function only
-// ever reads.
-//
-// Application Settings needed on the Static Web App (Azure Portal ->
-// Configuration), never committed to source control:
-//   AZURE_STORAGE_CONNECTION_STRING  connection string for the storage account
-//   DATASET_CONTAINER                container name, e.g. "data-sync" (default below)
+/* Serves a named data source to the dashboard.
+   A live pull uses server-side credentials, so it is gated to admins.
+   The token is read from configuration (Application setting or Key Vault
+   reference); it never appears in this code or in any response. */
+const { isAdmin } = require('../shared/auth');
+const { getCrmData } = require('../shared/nimble');
 
 module.exports = async function (context, req) {
-  const rawName = (req.params && req.params.name) || "";
-  const name = rawName.toLowerCase().replace(/[^a-z0-9-]/g, "");
+  const id = String(context.bindingData.id || '').toLowerCase();
 
-  if (!name) {
-    context.res = { status: 400, body: { error: "Missing or invalid source name." } };
-    return;
-  }
-
-  const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
-  const containerName = process.env.DATASET_CONTAINER || "data-sync";
-  const blobName = name + ".json";
-
-  if (!connectionString) {
-    context.res = {
-      status: 500,
-      body: { error: "Storage connection is not configured. Set AZURE_STORAGE_CONNECTION_STRING in the app's Application Settings." }
-    };
+  if (!isAdmin(req)) {
+    context.res = { status: 403, body: 'Admins only. API sources are managed by an administrator.' };
     return;
   }
 
   try {
-    const blobServiceClient = BlobServiceClient.fromConnectionString(connectionString);
-    const containerClient = blobServiceClient.getContainerClient(containerName);
-    const blobClient = containerClient.getBlobClient(blobName);
-
-    const exists = await blobClient.exists();
-    if (!exists) {
-      context.res = {
-        status: 404,
-        body: { error: "No data found yet for source '" + name + "'. The sync job hasn't run, or has not written to " + containerName + "/" + blobName + "." }
-      };
+    if (id === 'nimble') {
+      const token = process.env.NIMBLE_ACCESS_TOKEN;
+      if (!token) {
+        context.res = { status: 500, body: 'NIMBLE_ACCESS_TOKEN is not set. Add it in the Static Web App Application settings.' };
+        return;
+      }
+      const data = await getCrmData(token);
+      context.res = { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) };
       return;
     }
 
-    const download = await blobClient.download();
-    const text = await streamToString(download.readableStreamBody);
+    if (id === 'netsuite') {
+      context.res = { status: 501, body: 'NetSuite is not configured yet. Add the five NetSuite values and the NetSuite puller, then try again.' };
+      return;
+    }
 
-    context.res = {
-      status: 200,
-      headers: {
-        "Content-Type": "application/json",
-        "Cache-Control": "no-store"
-      },
-      body: text
-    };
-  } catch (err) {
-    context.log.error("getSource/" + name + " failed:", err);
-    context.res = {
-      status: 502,
-      body: { error: "Could not read data for source '" + name + "' from storage." }
-    };
+    context.res = { status: 404, body: `Unknown source '${id}'.` };
+  } catch (e) {
+    context.res = { status: 502, body: 'Source fetch failed: ' + (e.message || String(e)) };
   }
 };
-
-function streamToString(readableStream) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    readableStream.on("data", (data) => chunks.push(Buffer.isBuffer(data) ? data : Buffer.from(data)));
-    readableStream.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-    readableStream.on("error", reject);
-  });
-}
