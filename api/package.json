@@ -2,6 +2,9 @@
   "name": "itie-revenue-intelligence-api",
   "version": "1.0.0",
   "private": true,
+  "scripts": {
+    "build": "echo no build step required"
+  },
   "dependencies": {
     "@azure/storage-blob": "^12.17.0"
   },
