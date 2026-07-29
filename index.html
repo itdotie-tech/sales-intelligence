@@ -1780,7 +1780,13 @@ async function loadSecondarySource(id){
     const json=await res.json();
     SOURCE_DATA[id]={data:json,loadedAt:new Date().toISOString()};
     saveSourceData();
-    if(status)status.textContent='Loaded '+(Array.isArray(json)?json.length+' records':'data')+' · '+new Date().toLocaleString();
+    // re-run the merge now so ownership fills immediately, whatever order things were loaded in
+    if(hasData){ bindData(); buildNav(); rebuildOwnerFilter(); }
+    renderSourceBadge();
+    const accs=(json&&Array.isArray(json.accounts))?json.accounts.length:(Array.isArray(json)?json.length:0);
+    const linked=(json&&Array.isArray(json.accounts)&&typeof CRM!=='undefined'&&CRM)?CRM.matched:null;
+    if(status)status.textContent='Loaded '+(accs?accs+' accounts'+(linked!=null?', '+linked+' linked to clients':''):'data')+' · '+new Date().toLocaleString('en-IE');
+    if(hasData&&state.page!=='data') refresh(); else if(state.page==='data') renderData();
     return true;
   }catch(err){
     if(status)status.textContent='Not connected yet ('+(err.message||err)+')';
