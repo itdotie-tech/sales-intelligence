@@ -979,7 +979,11 @@ function buildFbar(){
   ff.min=ft.min=M[0]; ff.max=ft.max=M[NM-1];
   rebuildOwnerFilter(); syncMonthInputs(); drawChips();
   document.getElementById('fOwner').onchange=e=>{state.owner=e.target.value;refresh();};
-  document.getElementById('fClientSel').onchange=e=>{state.sel=e.target.value===''?null:new Set([+e.target.value]);drawChips();refresh();};
+  document.getElementById('fClientSel').onchange=e=>{
+    if(e.target.value===''){state.sel=null;} else {state.sel=new Set([+e.target.value]); state.c360=C[+e.target.value];}
+    drawChips();
+    if(state.page==='c360'){renderC360();} else refresh();
+  };
   const cmp=document.getElementById('fCmp'); cmp.value=state.cmp; cmp.onchange=e=>{state.cmp=e.target.value;refresh();};
   const fc=document.getElementById('fClient'),dd=document.getElementById('fClientDD');
   fc.addEventListener('input',()=>{const q=fc.value.toLowerCase();if(!q){dd.style.display='none';return;}
@@ -1004,7 +1008,7 @@ function applyPreset(r){
   else {state.m0=0;state.m1=NM-1;}
 }
 function rebuildOwnerFilter(){
-  const owners=[...new Set([...META.map(m=>m.owner).filter(Boolean),...Object.values(OWNER_OVR)])].sort();
+  const owners=[...new Set([...META.map(m=>ownerOf(m.n)).filter(o=>o&&o!=='Unassigned'),...Object.values(OWNER_OVR).map(canonAM)])].sort();
   const el=document.getElementById('fOwner');
   if(el)el.innerHTML='<option value="">All owners</option>'+owners.map(o=>`<option${state.owner===o?' selected':''}>${esc(o)}</option>`).join('')+`<option${state.owner==='Unassigned'?' selected':''}>Unassigned</option>`;
 }
