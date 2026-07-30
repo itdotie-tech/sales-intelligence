@@ -2381,11 +2381,11 @@ async function pushOverride(patch){
 function crmFeed(){ for(const k of Object.keys(SOURCE_DATA)){ const d=SOURCE_DATA[k]&&SOURCE_DATA[k].data; if(d&&Array.isArray(d.accounts)) return d; } return null; }
 function hasCrm(){ return !!crmFeed(); }
 
-function blankMeta(nm,acc){
-  return { n:nm, br:[], dev:0, seats:0, tier:'', mrr:{}, ttmR:0, ttmN:0, first:'', last:'',
+function blankMeta(nm,acc,dev){
+  return { n:nm, br:[], dev:dev||0, seats:0, tier:'', mrr:{}, ttmR:0, ttmN:0, first:'', last:'',
     caps:[], cp:{endpoint:'None',user:'None',avStd:false,socStd:false}, m365:{}, owner:'',
-    ownerFinal:canonAM(acc.am)||'Unassigned', migrating:true,
-    crm:{tags:acc.tags||[],active:true,dormant:false,crmAm:acc.am||'',crmId:acc.crmId,status:'migrating',mismatch:false} };
+    ownerFinal:(accCls(acc).am||canonAM(acc.am))||'Unassigned', migrating:true,
+    crm:{tags:acc.tags||[],active:true,dormant:false,crmAm:accCls(acc).am||acc.am||'',crmId:acc.crmId,status:'migrating',mismatch:false} };
 }
 
 /* Join the CRM feed to the NetSuite client model.
@@ -2400,6 +2400,9 @@ function mergeCRM(){
   const ix=PIPE.buildIndex(baseNames);
   const review=[], mismatches=[], migrating=[], untagged=[];
   const attach={};
+  const pend=(DATA.pending||[]);
+  const pendIx=pend.length?PIPE.buildIndex(pend.map(x=>x.g)):null;
+  const pendUsed={};
   for(const acc of (feed.accounts||[])){
     const nm=(acc.name||'').trim(); if(!nm) continue;
     let client=CRM_XWALK[nm]||null; if(client==='__migrating__'){ if(acc.active)migrating.push(acc); continue; }
@@ -2430,7 +2433,9 @@ function mergeCRM(){
   for(const acc of migrating){
     const nm=(acc.name||'').trim();
     if(!nm||cI[nm]!==undefined) continue;
-    const m=blankMeta(nm,acc);
+    let dev=0;
+    if(pendIx){ const pm=PIPE.matchSite(nm,pendIx); if(pm.name&&pm.score>=0.6&&!pendUsed[pm.name]){ const pg=pend.find(x=>x.g===pm.name); if(pg){ dev=pg.dev; pendUsed[pm.name]=1; } } }
+    const m=blankMeta(nm,acc,dev);
     META.push(m); C.push(nm); cI[nm]=C.length-1; metaByC[nm]=m;
   }
   NC=C.length;

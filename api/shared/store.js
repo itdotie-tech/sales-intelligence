@@ -1,12 +1,23 @@
 /* Central store for manual corrections (account managers, name links, renames).
    Backed by a single JSON blob so every user sees the same values.
-   Reads need only a connection string; writes are gated to admins in the endpoint. */
-const { BlobServiceClient } = require('@azure/storage-blob');
+
+   IMPORTANT: the Azure storage SDK is loaded lazily, inside the functions that
+   use it, not at module load. That way, if the package is not installed or the
+   storage is not configured, ONLY the overrides endpoint is affected — the rest
+   of the API (getSource / Nimble) keeps working. */
 const CONTAINER = process.env.DATASET_CONTAINER || 'data-sync';
 const BLOB = 'overrides.json';
 const EMPTY = { ownerOverrides:{}, nameCrosswalk:{}, clientRenames:{}, updatedAt:null, updatedBy:null };
 
+let _sdk = null;
+function sdk(){
+  if(_sdk) return _sdk;
+  try { _sdk = require('@azure/storage-blob'); }
+  catch(e){ throw new Error('Storage library not installed. Add "@azure/storage-blob" to api/package.json and redeploy.'); }
+  return _sdk;
+}
 function container(){
+  const { BlobServiceClient } = sdk();
   const cs = process.env.AZURE_STORAGE_CONNECTION_STRING;
   if(!cs) throw new Error('AZURE_STORAGE_CONNECTION_STRING is not set in Application settings.');
   return BlobServiceClient.fromConnectionString(cs).getContainerClient(CONTAINER);
@@ -26,7 +37,6 @@ async function writeOverrides(obj){
   await b.upload(body, Buffer.byteLength(body), { blobHTTPHeaders:{ blobContentType:'application/json' } });
   return obj;
 }
-// merge a small patch into the stored object; a null value deletes that key
 function applyPatch(cur, patch){
   const out = {
     ownerOverrides: { ...cur.ownerOverrides, ...(patch.ownerOverrides||{}) },
