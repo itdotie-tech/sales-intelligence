@@ -938,6 +938,10 @@ const PAGES=[
  ['cyber','CyberProtect Radar','M10 2l7 3v5c0 5-3.5 7.5-7 8-3.5-.5-7-3-7-8V5z',0,'sub'],
  ['nis2','NIS2 Compliance','M6 2h8l2 3v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5z M8 9h4M8 12h4',0,'sub'],
  ['win10','Windows 10 Risk','M3 5l6-1v6H3zM10 4l7-1v7h-7zM3 11h6v6l-6-1zM10 11h7v7l-7-1',0,'sub'],
+ ['crm','CRM Overview','M10 3a4 4 0 100 8 4 4 0 000-8zM3 17a7 7 0 0114 0',6],
+ ['pipeline','Pipeline Health','M3 17l5-6 4 3 5-8M17 6v3M17 6h-3',6],
+ ['leads','Lead Scoring','M10 2l2.4 5 5.6.5-4.2 3.7 1.3 5.6L10 19l-5.1 2.8 1.3-5.6L2 12.5l5.6-.5z',6],
+ ['assign','Lead Assignment','M7 9a3 3 0 100-6 3 3 0 000 6zM2 17a5 5 0 0110 0M15 11l2 2 3-3',6],
  ['recon','Account Reconciliation','M4 7h11M4 7l3-3M4 7l3 3M16 13H5M16 13l-3-3M16 13l-3 3',6],
  ['pending','Pending Migration','M4 10h12M12 6l4 4-4 4',4],
  ['data','Data Hub','M10 3c3.9 0 7 1 7 2.5S13.9 8 10 8 3 7 3 5.5 6.1 3 10 3zM3 5.5v9c0 1.5 3.1 2.5 7 2.5s7-1 7-2.5v-9',4],
@@ -945,7 +949,7 @@ const PAGES=[
 const SECT={0:'',1:'Analysis',5:'Sales tools',2:'Drill-down',3:'Cyber posture',6:'CRM',4:'Coming across'};
 function buildNav(){
   document.getElementById('nav').innerHTML=PAGES.map(p=>{const[id,label,path,sect,sub]=p;
-    const locked=(!hasData&&id!=='data'&&id!=='pkg')||(id==='win10'&&hasData&&!hasAttrs)||(id==='pending'&&hasData&&!((DATA.pending||[]).length))||(id==='recon'&&!hasCrm());
+    const locked=(!hasData&&id!=='data'&&id!=='pkg'&&!((id==='crm'||id==='recon'||id==='pipeline'||id==='leads'||id==='assign')&&hasCrm()))||(id==='win10'&&hasData&&!hasAttrs)||(id==='pending'&&hasData&&!((DATA.pending||[]).length))||((id==='recon'||id==='crm'||id==='pipeline'||id==='leads'||id==='assign')&&!hasCrm());
     return (SECT[sect]?`<div class="sep">${SECT[sect]}</div>`:'')+
     `<button data-p="${id}" class="${sub?'sub':''} ${locked?'locked':''}"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="${path}"/></svg><span>${label}</span></button>`;}).join('');
 }
@@ -1785,12 +1789,13 @@ async function loadSecondarySource(id){
     SOURCE_DATA[id]={data:json,loadedAt:new Date().toISOString()};
     saveSourceData();
     // re-run the merge now so ownership fills immediately, whatever order things were loaded in
-    if(hasData){ bindData(); buildNav(); rebuildOwnerFilter(); }
+    crmAnalyse();
+    if(hasData){ bindData(); buildNav(); rebuildOwnerFilter(); } else { buildNav(); }
     renderSourceBadge();
     const accs=(json&&Array.isArray(json.accounts))?json.accounts.length:(Array.isArray(json)?json.length:0);
     const linked=(json&&Array.isArray(json.accounts)&&typeof CRM!=='undefined'&&CRM)?CRM.matched:null;
     if(status)status.textContent='Loaded '+(accs?accs+' accounts'+(linked!=null?', '+linked+' linked to clients':''):'data')+' · '+new Date().toLocaleString('en-IE');
-    if(hasData&&state.page!=='data') refresh(); else if(state.page==='data') renderData();
+    if(state.page==='data') renderData(); else if(hasData||((state.page==='crm'||state.page==='recon')&&hasCrm())) refresh();
     return true;
   }catch(err){
     if(status)status.textContent='Not connected yet ('+(err.message||err)+')';
@@ -1902,12 +1907,12 @@ function saveSettings(){
   pbSave();
   const ow=document.getElementById('ownerOvr');
   if(ow){ OWNER_OVR={}; ow.value.split('\n').forEach(l=>{const i=l.indexOf('=');if(i>0){const k=l.slice(0,i).trim(),v=l.slice(i+1).trim();if(k&&v)OWNER_OVR[k]=v;}});
-    localStorage.setItem('itie3_owner',JSON.stringify(OWNER_OVR)); }
+    localStorage.setItem('itie3_owner',JSON.stringify(OWNER_OVR)); pushOverride({ownerOverrides:OWNER_OVR}); }
   const rb=document.getElementById('renameBox');
   let changed=false;
   if(rb){ const rn={}; rb.value.split('\n').forEach(l=>{const i=l.indexOf('=');if(i>0){const k=l.slice(0,i).trim(),v=l.slice(i+1).trim();if(k&&v)rn[k]=v;}});
     changed=JSON.stringify(rn)!==JSON.stringify(CLIENT_RENAME);
-    CLIENT_RENAME=rn; localStorage.setItem('itie3_rename',JSON.stringify(rn)); }
+    CLIENT_RENAME=rn; localStorage.setItem('itie3_rename',JSON.stringify(rn)); pushOverride({clientRenames:rn}); }
   closeSettings();
   if(hasData){ if(changed){bindData();buildNav();buildFbar();syncMonthInputs();} rebuildOwnerFilter(); refresh(); }
   else refresh();
@@ -2323,7 +2328,7 @@ function renderPending(){
 }
 
 /* ============ BOOT ============ */
-const RENDER={exec:renderExec,radar:renderRadar,fin:renderFin,kpi:renderKpi,c360:renderC360,price:renderPrice,gap:renderGap,m365:renderM365,posture:renderPosture,cyber:renderCyber,nis2:renderNis2,win10:renderWin10,pkg:renderPkg,am:renderAm,health:renderHealth,recon:renderRecon,pending:renderPending,data:renderData};
+const RENDER={exec:renderExec,radar:renderRadar,fin:renderFin,kpi:renderKpi,c360:renderC360,price:renderPrice,gap:renderGap,m365:renderM365,posture:renderPosture,cyber:renderCyber,nis2:renderNis2,win10:renderWin10,pkg:renderPkg,am:renderAm,health:renderHealth,crm:renderCrm,pipeline:renderPipeline,leads:renderLeads,assign:renderAssign,recon:renderRecon,pending:renderPending,data:renderData};
 
 /* ================= CRM (Nimble) merge layer ================= */
 const AM_ROSTER={DF:'David Flood',DG:'David Groark',DMcD:'David McDonald',DOC:"Derek O'Callaghan",EB:'Emil Badea',EJ:'Eoghan Johnson',SC:'Simon Collins',MD:'Michael Daly'};
@@ -2343,6 +2348,35 @@ try{ const a=localStorage.getItem('itie3_crm_ovr'); if(a)CRM_OVR=JSON.parse(a); 
 function saveXwalk(){ try{localStorage.setItem('itie3_crm_xwalk',JSON.stringify(CRM_XWALK));}catch(e){} }
 function saveCrmOvr(){ try{localStorage.setItem('itie3_crm_ovr',JSON.stringify(CRM_OVR));}catch(e){} }
 
+/* ---- shared corrections: read from and write to the central store ----
+   Every correction is applied locally at once, then pushed to Azure so the
+   next user inherits it. If the endpoint is not deployed yet, it silently
+   stays local, so nothing breaks before the storage is switched on. */
+let CENTRAL_META={updatedAt:null,updatedBy:null,synced:false};
+async function loadCentralOverrides(){
+  try{
+    const r=await fetch('/api/overrides',{credentials:'include',cache:'no-store'});
+    if(!r.ok) return false;
+    const d=await r.json(); if(!d||typeof d!=='object') return false;
+    Object.assign(OWNER_OVR, d.ownerOverrides||{});
+    Object.assign(CRM_XWALK, d.nameCrosswalk||{});
+    Object.assign(CLIENT_RENAME, d.clientRenames||{});
+    CENTRAL_META={updatedAt:d.updatedAt||null,updatedBy:d.updatedBy||null,synced:true};
+    try{ localStorage.setItem('itie3_owner',JSON.stringify(OWNER_OVR));
+         localStorage.setItem('itie3_crm_xwalk',JSON.stringify(CRM_XWALK));
+         localStorage.setItem('itie3_rename',JSON.stringify(CLIENT_RENAME)); }catch(e){}
+    return true;
+  }catch(e){ return false; }
+}
+async function pushOverride(patch){
+  try{
+    const r=await fetch('/api/overrides',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify(patch)});
+    if(r.ok){ const d=await r.json(); CENTRAL_META={updatedAt:d.updatedAt,updatedBy:d.updatedBy,synced:true}; return {ok:true}; }
+    if(r.status===403) return {ok:false,reason:'not-admin'};
+    return {ok:false,reason:'error'};
+  }catch(e){ return {ok:false,reason:'offline'}; }
+}
+
 function crmFeed(){ for(const k of Object.keys(SOURCE_DATA)){ const d=SOURCE_DATA[k]&&SOURCE_DATA[k].data; if(d&&Array.isArray(d.accounts)) return d; } return null; }
 function hasCrm(){ return !!crmFeed(); }
 
@@ -2358,6 +2392,7 @@ function blankMeta(nm,acc){
    - tagged active accounts with no NetSuite match become migrating clients (acquired co.)
    - confident name matches auto-link; plausible ones go to the reconciliation queue */
 function mergeCRM(){
+  crmAnalyse();
   CRM=null;
   const feed=crmFeed(); if(!feed||!hasData) return;
   const baseNames=C.slice(0,NC0);
@@ -2382,7 +2417,7 @@ function mergeCRM(){
   for(let i=0;i<NC0;i++){
     const m=META[i]; const a=attach[m.n];
     const crmAm=a?a.crmAm:'', active=a?a.active:false, dormant=a?a.dormant:false;
-    const rec=reconcileAM(m.owner||'', crmAm, CRM_OVR[m.n]);
+    const rec=reconcileAM(m.owner||'', crmAm, OWNER_OVR[m.n]);
     m.ownerFinal=rec.am;
     m.crm={ tags:a?a.tags:[], active, dormant, crmAm, crmId:a?a.crmId:null,
             status:crmStatusOf(active,true), mismatch:rec.mismatch, crmSays:rec.crmSays||'', crmName:a?a.crmName:'' };
@@ -2406,14 +2441,18 @@ function mergeCRM(){
 
 /* save a name decision from the reconciliation screen, then re-merge live */
 function crmAssign(crmName, clientName){
-  if(clientName==='__migrating__') CRM_XWALK[crmName]='__migrating__';
-  else if(clientName) CRM_XWALK[crmName]=clientName;
-  else delete CRM_XWALK[crmName];
-  saveXwalk(); bindData(); rebuildOwnerFilter(); if(state.page==='recon')renderRecon(); else refresh();
+  const val = clientName==='__migrating__' ? '__migrating__' : (clientName||null);
+  if(val) CRM_XWALK[crmName]=val; else delete CRM_XWALK[crmName];
+  saveXwalk(); bindData(); rebuildOwnerFilter();
+  pushOverride({nameCrosswalk:{[crmName]: val}}).then(()=>{ if(state.page==='recon')renderRecon(); });
+  if(state.page==='recon')renderRecon(); else refresh();
 }
 function crmSetOwner(client, owner){
-  if(owner) CRM_OVR[client]=owner; else delete CRM_OVR[client];
-  saveCrmOvr(); bindData(); rebuildOwnerFilter(); if(state.page==='recon')renderRecon(); else refresh();
+  if(owner) OWNER_OVR[client]=owner; else delete OWNER_OVR[client];
+  try{localStorage.setItem('itie3_owner',JSON.stringify(OWNER_OVR));}catch(e){}
+  bindData(); rebuildOwnerFilter();
+  pushOverride({ownerOverrides:{[client]: owner||null}}).then(()=>{ if(state.page==='recon')renderRecon(); });
+  if(state.page==='recon')renderRecon(); else refresh();
 }
 
 /* source-of-truth badge: states plainly where each part of the picture comes from */
@@ -2433,13 +2472,197 @@ function renderSourceBadge(){
   el.innerHTML=`<div class="sb"><span class="dotc on"></span><span><b>NetSuite: ${nsLabel}</b><small>${NC0} clients · to ${esc(DATA.maxDate||'')}</small></span></div>${crm}`;
 }
 
+
+/* CRM analysis that stands on its own, so the Nimble data is useful even
+   before NetSuite is connected. Reads the feed directly, no client model needed. */
+let CRMA=null;
+function crmAnalyse(){
+  const feed=crmFeed(); if(!feed){ CRMA=null; return; }
+  const accs=feed.accounts||[];
+  const active=accs.filter(a=>a.active);
+  const dormant=accs.filter(a=>a.dormant && !a.active);
+  const prospects=accs.filter(a=>!a.active && !a.dormant);
+  const byManager={}; active.forEach(a=>{ const m=canonAM(a.am)||'Unassigned'; byManager[m]=(byManager[m]||0)+1; });
+  const tagCounts={}; accs.forEach(a=>(a.tags||[]).forEach(t=>{ tagCounts[t]=(tagCounts[t]||0)+1; }));
+  let loadedAt=''; for(const k of Object.keys(SOURCE_DATA)){ const d=SOURCE_DATA[k]; if(d&&d.data&&Array.isArray(d.data.accounts)){ loadedAt=d.loadedAt; break; } }
+  CRMA={ total:accs.length, active:active.length, dormant:dormant.length, prospects:prospects.length, byManager, tagCounts, activeAccounts:active, loadedAt };
+}
+function isAccountTag(t){ return /accounts?/i.test(t) && /(^|[^a-z])(DF|DG|DMcD|DOC|EB|EJ|SC|MD)([^a-z]|$)/i.test(t); }
+
+function renderCrm(){
+  if(!hasCrm()){ document.getElementById('pg-crm').innerHTML='<div class="lockmsg"><div class="big">🔗</div><h2>No CRM feed loaded</h2><p>Connect Nimble on the Data Hub. Once the feed is in, this section analyses your CRM on its own, with or without NetSuite.</p><button class="btn" style="margin-top:16px" onclick="go(\'data\')">Open the Data Hub</button></div>'; return; }
+  crmAnalyse(); const A=CRMA;
+  const mgrRows=Object.entries(A.byManager).sort((a,b)=>b[1]-a[1]);
+  const svcTags=Object.entries(A.tagCounts).filter(([t])=>!isAccountTag(t)).sort((a,b)=>b[1]-a[1]);
+  const when=A.loadedAt?new Date(A.loadedAt).toLocaleString('en-IE',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'';
+  document.getElementById('pg-crm').innerHTML=`
+  <h1 class="ph">CRM <em>Overview</em></h1>
+  <p class="psub">Straight from Nimble, independent of NetSuite. Active clients are the tagged accounts under each manager; everything else is pipeline for lead scoring later. ${hasData?'NetSuite is connected, so revenue sits alongside this on the other pages.':'NetSuite is not connected, so this is the CRM picture on its own. Load the workbook or the NetSuite feed to add revenue.'}${when?` Feed loaded ${when}.`:''}</p>
+  <div class="grid cards">
+    <div class="card"><div class="k">Accounts in Nimble</div><div class="v">${A.total.toLocaleString()}</div><div class="s">people and companies</div></div>
+    <div class="card"><div class="k">Active clients</div><div class="v pos">${A.active.toLocaleString()}</div><div class="s">tagged to a manager</div></div>
+    <div class="card"><div class="k">Pipeline / prospects</div><div class="v">${A.prospects.toLocaleString()}</div><div class="s">untagged, for lead scoring</div></div>
+    <div class="card"><div class="k">Dormant</div><div class="v">${A.dormant.toLocaleString()}</div><div class="s">marked (D), excluded</div></div>
+  </div>
+  <div class="two">
+    <div class="panel"><h3>Active clients by manager</h3><div class="hint">Book size from the account tags. This is the roster each manager owns, before any revenue is attached.</div>
+    <div class="chartbox"><canvas id="chCrmMgr"></canvas></div>
+    <div class="twrap" style="max-height:280px;margin-top:10px"><table><thead><tr><th>Manager</th><th class="num">Active clients</th><th class="num">Share</th></tr></thead><tbody>
+    ${mgrRows.map(([m,n])=>`<tr><td>${esc(m)}</td><td class="num">${n}</td><td class="num">${A.active?fmtP(n/A.active):'—'}</td></tr>`).join('')||'<tr><td colspan=3 class="hint">No tagged accounts found. Check the tag format in Nimble.</td></tr>'}
+    </tbody></table></div></div>
+    <div class="panel"><h3>Service footprint from tags</h3><div class="hint">What the CRM records each account carries, such as the CyberProtect tiers. A quick read on product spread across the base, straight from Nimble tags.</div>
+    <div class="chartbox"><canvas id="chCrmTags"></canvas></div>
+    <div class="twrap" style="max-height:280px;margin-top:10px"><table><thead><tr><th>Tag</th><th class="num">Accounts</th></tr></thead><tbody>
+    ${svcTags.slice(0,25).map(([t,n])=>`<tr><td>${esc(t)}</td><td class="num">${n}</td></tr>`).join('')||'<tr><td colspan=2 class="hint">No service tags found.</td></tr>'}
+    </tbody></table></div></div>
+  </div>
+  ${hasData?`<div class="note"><b>Reconciliation.</b> NetSuite is connected, so head to <span class="clink" onclick="go('recon')">Account Reconciliation</span> to link names and clear any manager conflicts, which sharpens every figure across the dashboard.</div>`:`<div class="note"><b>Add revenue.</b> This is ownership and footprint only. Load the NetSuite workbook or connect the API to bring in MRR, posture and the opportunity engine beside it.</div>`}`;
+
+  const mgrColors=mgrRows.map((_,i)=>PALETTE[i%PALETTE.length]);
+  mkChart('chCrmMgr',{type:'bar',data:{labels:mgrRows.map(r=>r[0]),datasets:[{label:'Active clients',data:mgrRows.map(r=>r[1]),backgroundColor:mgrColors}]},options:{maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{precision:0}}}}});
+  const tg=svcTags.slice(0,10);
+  mkChart('chCrmTags',{type:'bar',data:{labels:tg.map(r=>r[0]),datasets:[{label:'Accounts',data:tg.map(r=>r[1]),backgroundColor:'#00a0d8'}]},options:{indexAxis:'y',maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{precision:0}}}}});
+}
+
+
+/* ================= CRM: Pipeline health, Lead scoring, Lead assignment =================
+   These read the Nimble feed. The pipeline-driven parts populate once the puller
+   is extended to fetch deals and activity; until then they degrade to a clear state
+   and the assignment view still works from book size. */
+function allDeals(){ const feed=crmFeed(); if(!feed) return []; const out=[];
+  (feed.accounts||[]).forEach(a=>(a.pipeline||[]).forEach(d=>out.push({...d, account:a.name, am:canonAM(a.am)||'Unassigned'})));
+  return out; }
+function hasPipeline(){ return allDeals().length>0; }
+function dealAge(d){ if(d.ageDays!=null) return d.ageDays; return null; }
+
+function renderPipeline(){
+  if(!hasCrm()){ document.getElementById('pg-pipeline').innerHTML=lockCrmMsg('pipeline'); return; }
+  crmAnalyse();
+  const deals=allDeals();
+  const openVal=deals.reduce((s,d)=>s+(+d.value||0),0);
+  const wVal=deals.reduce((s,d)=>s+(+d.value||0)*((d.probability!=null?+d.probability:50)/100),0);
+  const byStage={}; deals.forEach(d=>{ const st=d.stage||'Unstaged'; (byStage[st]=byStage[st]||{n:0,v:0}); byStage[st].n++; byStage[st].v+=(+d.value||0); });
+  const byMgr={}; deals.forEach(d=>{ (byMgr[d.am]=byMgr[d.am]||{n:0,v:0}); byMgr[d.am].n++; byMgr[d.am].v+=(+d.value||0); });
+  const stale=deals.filter(d=>dealAge(d)!=null&&dealAge(d)>90);
+  const noClose=deals.filter(d=>!d.closeDate);
+  const soon=deals.filter(d=>{ if(!d.closeDate)return false; const dd=(new Date(d.closeDate)-Date.now())/864e5; return dd>=0&&dd<=30; }).sort((a,b)=>(+b.value||0)-(+a.value||0));
+  const flags=[];
+  if(stale.length) flags.push(['Stale deals', stale.length, 'open more than 90 days with no movement', 'warn']);
+  if(noClose.length) flags.push(['No close date', noClose.length, 'cannot be forecast until dated', 'warn']);
+  if(soon.length) flags.push(['Closing within 30 days', soon.length, fmtEk(soon.reduce((s,d)=>s+(+d.value||0),0))+' in value', 'pos']);
+
+  document.getElementById('pg-pipeline').innerHTML=`
+  <h1 class="ph">Pipeline <em>Health &amp; Insights</em></h1>
+  <p class="psub">Open opportunities from Nimble, by stage and by manager, with the red flags worth acting on. ${hasPipeline()?'':'The deals feed is not connected yet, so values are empty. Once the puller fetches Nimble deals this fills automatically. The funnel below is what the tags alone can tell us today.'}</p>
+  ${hasPipeline()?`
+  <div class="grid cards">
+    <div class="card"><div class="k">Open pipeline</div><div class="v">${fmtEk(openVal)}</div><div class="s">${deals.length} deals</div></div>
+    <div class="card"><div class="k">Weighted</div><div class="v">${fmtEk(wVal)}</div><div class="s">by probability</div></div>
+    <div class="card ${stale.length?'hl':''}"><div class="k">Stale</div><div class="v ${stale.length?'warn':''}">${stale.length}</div><div class="s">90+ days</div></div>
+    <div class="card"><div class="k">Closing &lt;30d</div><div class="v pos">${soon.length}</div><div class="s">${fmtEk(soon.reduce((s,d)=>s+(+d.value||0),0))}</div></div>
+  </div>
+  <div class="two">
+    <div class="panel"><h3>By stage</h3><div class="chartbox"><canvas id="chPipeStage"></canvas></div></div>
+    <div class="panel"><h3>By manager</h3><div class="chartbox"><canvas id="chPipeMgr"></canvas></div></div>
+  </div>
+  <div class="panel"><h3>Red flags</h3>${flags.length?`<div class="grid cards">${flags.map(f=>`<div class="card ${f[3]==='warn'?'hl':''}"><div class="k">${f[0]}</div><div class="v ${f[3]}">${f[1]}</div><div class="s">${f[2]}</div></div>`).join('')}</div>`:'<div class="hint">Nothing flagged. Pipeline is clean.</div>'}</div>
+  <div class="panel"><h3>Biggest opportunities closing soon</h3><div class="twrap" style="max-height:360px"><table><thead><tr><th>Deal</th><th>Client</th><th>Manager</th><th class="num">Value</th><th>Close</th></tr></thead><tbody>
+  ${soon.slice(0,30).map(d=>`<tr><td>${esc(d.title||'—')}</td><td>${esc(d.account)}</td><td>${esc(d.am)}</td><td class="num">${fmtEk(+d.value||0)}</td><td>${esc(d.closeDate||'—')}</td></tr>`).join('')||'<tr><td colspan=5 class="hint">Nothing closing in the next 30 days.</td></tr>'}
+  </tbody></table></div></div>`
+  :`
+  <div class="grid cards">
+    <div class="card"><div class="k">Active clients</div><div class="v pos">${CRMA.active}</div><div class="s">tagged</div></div>
+    <div class="card"><div class="k">Pipeline / prospects</div><div class="v">${CRMA.prospects}</div><div class="s">untagged</div></div>
+    <div class="card"><div class="k">Dormant</div><div class="v">${CRMA.dormant}</div><div class="s">excluded</div></div>
+    <div class="card"><div class="k">Open pipeline value</div><div class="v">—</div><div class="s">needs deals feed</div></div>
+  </div>
+  <div class="note"><b>Turn this on.</b> Pipeline value, stages, ageing and forecast come from Nimble deals, which the current puller does not fetch yet. The deals feed is the next piece; once it is in, this page fills with no further work.</div>`}`;
+
+  if(hasPipeline()){
+    const st=Object.entries(byStage).sort((a,b)=>b[1].v-a[1].v);
+    mkChart('chPipeStage',{type:'bar',data:{labels:st.map(x=>x[0]),datasets:[{label:'Value',data:st.map(x=>x[1].v),backgroundColor:st.map((_,i)=>PALETTE[i%PALETTE.length])}]},options:{maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{callback:fmtEk}}}}});
+    const mg=Object.entries(byMgr).sort((a,b)=>b[1].v-a[1].v);
+    mkChart('chPipeMgr',{type:'bar',data:{labels:mg.map(x=>x[0]),datasets:[{label:'Value',data:mg.map(x=>x[1].v),backgroundColor:'#00a0d8'}]},options:{indexAxis:'y',maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{callback:fmtEk}}}}});
+  }
+}
+
+function leadScore(a){
+  // transparent, tunable. Uses what the feed provides; deal value and recency
+  // dominate once the deals/activity feed is in, tags carry it until then.
+  let s=0; const why=[];
+  const dv=(a.pipeline||[]).reduce((x,d)=>x+(+d.value||0),0);
+  if(dv>0){ const p=Math.min(40,Math.round(dv/250)); s+=p; why.push('deal value +'+p); }
+  if(a.lastContactDays!=null){ const r=a.lastContactDays<=30?20:a.lastContactDays<=90?10:0; if(r){s+=r;why.push('recent contact +'+r);} }
+  const svc=(a.tags||[]).filter(t=>!isAccountTag(t)).length;
+  if(svc){ const p=Math.min(20,svc*5); s+=p; why.push('interest signals +'+p); }
+  if((a.tags||[]).length){ s+=5; why.push('engaged +5'); }
+  return {score:s, why};
+}
+function renderLeads(){
+  if(!hasCrm()){ document.getElementById('pg-leads').innerHTML=lockCrmMsg('leads'); return; }
+  crmAnalyse();
+  const feed=crmFeed(); const prospects=(feed.accounts||[]).filter(a=>!a.active&&!a.dormant);
+  const scored=prospects.map(a=>({a, ...leadScore(a)})).sort((x,y)=>y.score-x.score);
+  const enriched=scored.filter(x=>x.score>5).length;
+  document.getElementById('pg-leads').innerHTML=`
+  <h1 class="ph">Lead <em>Scoring</em></h1>
+  <p class="psub">Prospects ranked by how ready they look, using deal value, contact recency and interest signals from the tags. ${hasPipeline()?'':'Deal value and contact recency are not in the feed yet, so scores currently lean on tags alone. They sharpen the moment the deals and activity feed is connected.'} The weighting is deliberately simple and easy to change as you tell me what matters most.</p>
+  <div class="grid cards">
+    <div class="card"><div class="k">Prospects</div><div class="v">${prospects.length}</div><div class="s">untagged, in pipeline</div></div>
+    <div class="card"><div class="k">With a signal</div><div class="v pos">${enriched}</div><div class="s">score above baseline</div></div>
+    <div class="card"><div class="k">Scoring inputs live</div><div class="v">${hasPipeline()?'full':'tags only'}</div><div class="s">${hasPipeline()?'value, recency, tags':'connect deals for value & recency'}</div></div>
+  </div>
+  <div class="panel"><h3>Top leads</h3><div class="hint">Highest-scoring prospects first. The reasons column shows exactly what drove each score, so it is never a black box.</div>
+  <div class="twrap" style="max-height:460px"><table><thead><tr><th>Prospect</th><th class="num">Score</th><th>Why</th><th>Tags</th></tr></thead><tbody>
+  ${scored.slice(0,40).map(x=>`<tr><td>${esc(x.a.name)}</td><td class="num"><b>${x.score}</b></td><td class="hint" style="margin:0">${esc(x.why.join(', ')||'baseline')}</td><td>${(x.a.tags||[]).slice(0,3).map(t=>`<span class="tag">${esc(t)}</span>`).join(' ')||'—'}</td></tr>`).join('')||'<tr><td colspan=4 class="hint">No prospects found in the feed.</td></tr>'}
+  </tbody></table></div></div>`;
+}
+
+function renderAssign(){
+  if(!hasCrm()){ document.getElementById('pg-assign').innerHTML=lockCrmMsg('assign'); return; }
+  crmAnalyse();
+  const feed=crmFeed(); const accs=feed.accounts||[];
+  const mgrs=Object.values(AM_ROSTER);
+  const load=mgrs.map(m=>{
+    const book=CRMA.byManager[m]||0;
+    const mine=accs.filter(a=>canonAM(a.am)===m);
+    const openDeals=mine.reduce((s,a)=>s+((a.pipeline||[]).length),0);
+    const pipeVal=mine.reduce((s,a)=>s+((a.pipeline||[]).reduce((x,d)=>x+(+d.value||0),0)),0);
+    return {m,book,openDeals,pipeVal};
+  });
+  const pipe=load.some(l=>l.openDeals>0||l.pipeVal>0);
+  const maxBook=Math.max(1,...load.map(l=>l.book)), maxOpen=Math.max(1,...load.map(l=>l.openDeals));
+  load.forEach(l=>{ l.score = (l.book/maxBook)*(pipe?0.6:1) + (pipe?(l.openDeals/maxOpen)*0.4:0); });
+  const sorted=[...load].sort((a,b)=>a.score-b.score);
+  const rec=sorted[0];
+  document.getElementById('pg-assign').innerHTML=`
+  <h1 class="ph">Lead <em>Assignment</em></h1>
+  <p class="psub">Who has capacity for the next lead, read from each manager's book and, where present, their open pipeline. ${pipe?'':'Pipeline is not connected yet, so this balances on book size for now, and factors in open deals automatically once the deals feed is in.'} When you tell me each manager's sector or region specialisms, I will fold fit in alongside capacity so the recommendation is not on load alone.</p>
+  <div class="panel" style="border-color:rgba(0,160,216,.4)"><h3>Recommendation</h3>
+  <div style="font-size:15px;color:#dbe6fb">The next unassigned lead is best placed with <b style="color:var(--blue)">${esc(rec.m)}</b>, who currently carries the lightest load (${rec.book} active client${rec.book===1?'':'s'}${pipe?', '+rec.openDeals+' open deals':''}). ${sorted[1]?`Next in line: ${esc(sorted[1].m)}.`:''}</div></div>
+  <div class="panel"><h3>Manager capacity</h3><div class="hint">Lightest first. Load blends book size${pipe?' and open pipeline':''}; lower means more room to take on.</div>
+  <div class="chartbox"><canvas id="chAssign"></canvas></div>
+  <div class="twrap" style="margin-top:10px"><table><thead><tr><th>Manager</th><th class="num">Active clients</th>${pipe?'<th class="num">Open deals</th><th class="num">Pipeline value</th>':''}<th class="num">Relative load</th></tr></thead><tbody>
+  ${sorted.map(l=>`<tr><td>${esc(l.m)}${l.m===rec.m?' <span class="tag g">recommended</span>':''}</td><td class="num">${l.book}</td>${pipe?`<td class="num">${l.openDeals}</td><td class="num">${fmtEk(l.pipeVal)}</td>`:''}<td class="num">${Math.round(l.score*100)}%</td></tr>`).join('')}
+  </tbody></table></div></div>`;
+  const sb=[...load].sort((a,b)=>b.book-a.book);
+  mkChart('chAssign',{type:'bar',data:{labels:sb.map(l=>l.m),datasets:[{label:'Active clients',data:sb.map(l=>l.book),backgroundColor:sb.map(l=>l.m===rec.m?'#2fbf71':'#00a0d8')}]},options:{maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{precision:0}}}}});
+}
+
+function lockCrmMsg(pg){ return '<div class="lockmsg"><div class="big">🔗</div><h2>No CRM feed loaded</h2><p>Connect Nimble on the Data Hub. This CRM page then works on its own, with or without NetSuite.</p><button class="btn" style="margin-top:16px" onclick="go(\'data\')">Open the Data Hub</button></div>'; }
+
 /* ================= Reconciliation page ================= */
+
 function renderRecon(){
-  if(!hasCrm()||!CRM){ document.getElementById('pg-recon').innerHTML='<div class="lockmsg"><div class="big">🔗</div><h2>No CRM feed loaded</h2><p>Connect Nimble on the Data Hub, then this screen lets you clear the few account matches and manager conflicts once, and the decisions stick.</p><button class="btn" style="margin-top:16px" onclick="go(\'data\')">Open the Data Hub</button></div>'; return; }
+  if(!hasCrm()||!CRM){ document.getElementById('pg-recon').innerHTML = hasCrm()
+      ? '<div class="lockmsg"><div class="big">📊</div><h2>Load NetSuite to reconcile</h2><p>Reconciliation matches the CRM against NetSuite revenue, so it needs the workbook or the NetSuite feed loaded. Meanwhile, the CRM analyses on its own under CRM Overview.</p><button class="btn" style="margin-top:16px" onclick="go(\'crm\')">See CRM Overview</button></div>'
+      : '<div class="lockmsg"><div class="big">🔗</div><h2>No CRM feed loaded</h2><p>Connect Nimble on the Data Hub, then this screen lets you clear the few account matches and manager conflicts once, and the decisions stick.</p><button class="btn" style="margin-top:16px" onclick="go(\'data\')">Open the Data Hub</button></div>';
+    return; }
   const clientOpts=[...C].sort((a,b)=>a.localeCompare(b));
   const optList=(sel)=>clientOpts.map(c=>`<option value="${esc(c)}"${c===sel?' selected':''}>${esc(c)}</option>`).join('');
   document.getElementById('pg-recon').innerHTML=`
   <h1 class="ph">Account <em>Reconciliation</em></h1>
+  ${(function(){ if(CENTRAL_META.synced){ return `<div class="note" style="border-color:rgba(47,191,113,.35)"><b>Shared across the team.</b> Corrections made here save centrally and apply for everyone.${CENTRAL_META.updatedBy?` Last change by ${esc(CENTRAL_META.updatedBy)}${CENTRAL_META.updatedAt?' on '+new Date(CENTRAL_META.updatedAt).toLocaleString('en-IE',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):''}.`:''}</div>`; } return `<div class="note"><b>Saved in this browser only.</b> The shared store is not connected yet, so corrections stay on this machine. Once the overrides endpoint and storage are switched on, they will sync for everyone automatically.</div>`; })()}
   <p class="psub">Where Nimble and NetSuite see the same client differently. Confident name matches are already linked automatically; this screen is for the handful that need a human eye, plus any manager conflicts. Every decision here is saved, so it never comes back. NetSuite wins on ownership by default, and your correction wins over both.</p>
   <div class="grid cards">
     <div class="card"><div class="k">CRM accounts</div><div class="v">${CRM.accounts.toLocaleString()}</div><div class="s">${CRM.activeAccounts} tagged active</div></div>
@@ -2477,8 +2700,9 @@ function renderRecon(){
   </div>`;
 }
 
-function refresh(){if(!hasData&&state.page!=='pkg'){renderData();return;}RENDER[state.page]();}
+function refresh(){if(!hasData&&state.page!=='pkg'&&!(['crm','recon','pipeline','leads','assign'].includes(state.page)&&hasCrm())){renderData();return;}RENDER[state.page]();}
 bindData();buildNav();
+loadCentralOverrides().then(loaded=>{ if(loaded){ if(hasData){ bindData(); buildNav(); rebuildOwnerFilter(); } if(state.page)refresh(); } });
 if(hasData){
   buildFbar();applyPreset('ttm');syncMonthInputs();go('exec');
 }else{
@@ -2489,6 +2713,6 @@ Promise.all(getSources().filter(s=>s.role!=='primary').map(s=>
   fetch(s.url,{credentials:'include',cache:'no-store'}).then(r=>r.ok?r.json():null).then(json=>{
     if(json){ SOURCE_DATA[s.id]={data:json,loadedAt:new Date().toISOString()}; saveSourceData(); return true; }
   }).catch(()=>{})
-)).then(res=>{ if(res.some(Boolean)&&hasData){ bindData(); buildNav(); rebuildOwnerFilter(); refresh(); } renderSourceBadge(); });
+)).then(res=>{ if(res.some(Boolean)){ crmAnalyse(); if(hasData){ bindData(); rebuildOwnerFilter(); } buildNav(); if(hasData||state.page==='crm'||state.page==='recon') refresh(); } renderSourceBadge(); });
 </script>
 </body></html>

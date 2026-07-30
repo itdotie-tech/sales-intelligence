@@ -73,6 +73,19 @@ async function getCrmData(token, opts){
     page++;
   } while(page <= pages && page <= maxPages);
 
+  // best-effort enrichment; each guarded so failure leaves accounts intact
+  try{
+    const [recency, deals] = await Promise.all([ fetchActivityRecency(token), fetchDeals(token) ]);
+    for(const a of accounts){
+      if(a.crmId!=null){
+        const last=recency[a.crmId];
+        if(last){ a.lastContactDays = Math.max(0, Math.round((Date.now()-new Date(last))/864e5)); }
+        const dl=deals[a.crmId]; if(dl&&dl.length) a.pipeline = dl;
+      }
+      if(!a.pipeline) a.pipeline=[];
+    }
+  }catch(e){ /* enrichment optional */ }
+
   return {
     generated: new Date().toISOString(),
     source: 'nimble',
@@ -87,3 +100,52 @@ async function getCrmData(token, opts){
 }
 
 module.exports = { getCrmData, nameOf, tagsOf };
+
+/* ------------------------------------------------------------------
+   Deals + activity enrichment (powers Pipeline Health, Lead Scoring, Churn).
+   Nimble's deal and activity shapes vary by plan, so both are best-effort and
+   fail safe: if an endpoint is not reachable, accounts simply keep an empty
+   pipeline and a null lastContactDays, and the dashboard degrades gracefully.
+   Confirm the two endpoints/shapes on first live pull, the same way we did tags.
+   ------------------------------------------------------------------ */
+async function fetchJson(token, path){
+  try{ const res=await fetch(`${NIMBLE_BASE}${path}`, { headers:{ Authorization:`Bearer ${token}` } });
+    if(!res.ok) return null; return await res.json(); }catch(e){ return null; }
+}
+// most-recent activity date per contact id -> for lastContactDays
+async function fetchActivityRecency(token, maxPages){
+  const map={}; let page=1, pages=1;
+  do{
+    const data=await fetchJson(token, `/activities?per_page=30&page=${page}`);
+    if(!data) break;
+    const list=data.resources||data.activities||[];
+    for(const act of list){
+      const when=act.created||act.modified||act.timestamp||act.date;
+      const ids=[].concat(act.contact_ids||act.contacts||act.related_contacts||[]);
+      ids.forEach(id=>{ const k=(id&&id.id)||id; if(!k||!when)return; if(!map[k]||new Date(when)>new Date(map[k])) map[k]=when; });
+    }
+    pages=(data.meta&&(data.meta.pages||data.meta.total_pages))||pages; page++;
+  } while(page<=pages && page<=(maxPages||15));
+  return map;
+}
+// open deals grouped by the contact/company they belong to
+async function fetchDeals(token, maxPages){
+  const byContact={}; let page=1, pages=1;
+  do{
+    const data=await fetchJson(token, `/deals?per_page=30&page=${page}`);   //! confirm the deals endpoint on first pull
+    if(!data) break;
+    const list=data.resources||data.deals||[];
+    for(const d of list){
+      const cid=(d.contact_id)||(d.contact&&d.contact.id)||(d.related_contact&&d.related_contact.id)||null;
+      const deal={ dealId:d.id, title:d.title||d.name||'', stage:(d.stage&&(d.stage.name||d.stage))||d.status||'',
+        value:+((d.value&&d.value.amount)||d.value||d.amount||0)||0,
+        probability:d.probability!=null?+d.probability:null, closeDate:d.close_date||d.expected_close_date||null,
+        ageDays:d.created?Math.round((Date.now()-new Date(d.created))/864e5):null };
+      (byContact[cid]=byContact[cid]||[]).push(deal);
+    }
+    pages=(data.meta&&(data.meta.pages||data.meta.total_pages))||pages; page++;
+  } while(page<=pages && page<=(maxPages||40));
+  return byContact;
+}
+module.exports.fetchActivityRecency = fetchActivityRecency;
+module.exports.fetchDeals = fetchDeals;
