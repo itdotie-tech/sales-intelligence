@@ -4,7 +4,7 @@ This turns the existing standalone dashboard into a secured web app: hosted on
 Azure Static Web Apps, gated by your Microsoft 365 (Entra ID) login, with a
 **Connected data sources** panel that supports any number of automated feeds
 — NetSuite for revenue, plus a CRM, a helpdesk, or anything else with an
-API — so the manual upload becomes optional rather than required.
+API — so the manual upload becomes optional rather than required..
 
 **Nothing about the dashboard itself changed.** The manual "drop your
 workbook here" flow on the Data Hub page still works exactly as before. This
