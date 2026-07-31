@@ -9,7 +9,7 @@ API — so the manual upload becomes optional rather than required.
 **Nothing about the dashboard itself changed.** The manual "drop your
 workbook here" flow on the Data Hub page still works exactly as before. This
 adds a second path — automated sources — that runs through the same
-processing for revenue data, and stores anything else ready to use.
+processing for revenue data, and stores anything else ready to use..
 
 > For a fully detailed, click-by-click walkthrough, see the companion
 > document **ITie-Revenue-Intelligence-Build-Guide.docx**. This README is the
