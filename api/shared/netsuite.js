@@ -40,13 +40,17 @@ async function suiteql(c, q, limit, offset){
 async function getNetsuiteData(opts){
   opts=opts||{}; const c=creds();
   const start=process.env.NETSUITE_START_DATE || '2023-01-01';
-  const q = `SELECT TO_CHAR(t.trandate,'YYYY-MM-DD') AS date, t.tranid AS invoice, BUILTIN.DF(t.entity) AS customer, BUILTIN.DF(tl.item) AS item, BUILTIN.DF(tl.account) AS account, BUILTIN.DF(tl.class) AS class, tl.netamount AS amount, tl.quantity AS quantity FROM transaction t, transactionline tl WHERE tl.transaction = t.id AND t.type = 'CustInvc' AND tl.mainline = 'F' AND tl.taxline = 'F' AND t.trandate >= TO_DATE('${start}','YYYY-MM-DD') ORDER BY t.trandate, t.id`;
-  const rows=[]; let offset=0, hasMore=true, pages=0; const limit=1000, maxPages=opts.maxPages||60;
+  // full=false (default) does a single fast page of the most recent lines, to
+  // confirm the connection without any chance of a timeout. full=true pages the
+  // whole history for the real build.
+  const full = opts.full===true;
+  const q = `SELECT TO_CHAR(t.trandate,'YYYY-MM-DD') AS date, t.tranid AS invoice, BUILTIN.DF(t.entity) AS customer, BUILTIN.DF(tl.item) AS item, BUILTIN.DF(tl.account) AS account, BUILTIN.DF(tl.class) AS class, tl.netamount AS amount, tl.quantity AS quantity FROM transaction t, transactionline tl WHERE tl.transaction = t.id AND t.type = 'CustInvc' AND tl.mainline = 'F' AND tl.taxline = 'F' AND t.trandate >= TO_DATE('${start}','YYYY-MM-DD') ORDER BY t.trandate ${full?'ASC':'DESC'}, t.id`;
+  const rows=[]; let offset=0, hasMore=true, pages=0; const limit=full?1000:50, maxPages=full?(opts.maxPages||60):1;
   while(hasMore && pages<maxPages){
     const data=await suiteql(c,q,limit,offset);
     (data.items||[]).forEach(r=>rows.push({ date:r.date, invoice:r.invoice, customer:r.customer, item:r.item, account:r.account, class:r.class, amount:+r.amount||0, quantity:+r.quantity||0 }));
     hasMore=!!data.hasMore; offset+=limit; pages++;
   }
-  return { generated:new Date().toISOString(), source:'netsuite', rows, meta:{ count:rows.length, from:start } };
+  return { generated:new Date().toISOString(), source:'netsuite', mode:(full?'full':'sample'), rows, meta:{ count:rows.length, from:start } };
 }
 module.exports = { getNetsuiteData };
