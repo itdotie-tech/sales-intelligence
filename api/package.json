@@ -1,6 +1,1 @@
-{
-  "name": "itie-revenue-intelligence-api",
-  "version": "1.0.0",
-  "description": "API backend for the IT.ie Revenue Intelligence dashboard",
-  "engines": { "node": ">=18" }
-}
+{ "name": "itie-revenue-intelligence-api", "version": "1.0.0", "engines": { "node": ">=18" } }
