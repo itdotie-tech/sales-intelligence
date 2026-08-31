@@ -36,7 +36,7 @@ async function getNetsuiteData(opts){
   // which the dashboard needs both to scope revenue and to match the mapping.
   const paged = opts.page!=null && opts.page>=0;
   const dir = (paged||opts.full===true) ? 'ASC' : 'DESC';
-  const q=`SELECT TO_CHAR(t.trandate,'YYYY-MM-DD') AS date, t.tranid AS invoice, BUILTIN.DF(t.entity) AS customer, BUILTIN.DF(tl.item) AS item, acc.fullname AS account, BUILTIN.DF(tl.class) AS class, tl.netamount AS amount, tl.quantity AS quantity FROM transaction t JOIN transactionline tl ON tl.transaction = t.id JOIN account acc ON acc.id = tl.account WHERE t.type = 'CustInvc' AND tl.mainline = 'F' AND tl.taxline = 'F' AND t.trandate >= TO_DATE('${start}','YYYY-MM-DD') ORDER BY t.trandate ${dir}, t.id`;
+  const q=`SELECT TO_CHAR(t.trandate,'YYYY-MM-DD') AS date, t.tranid AS invoice, BUILTIN.DF(t.entity) AS customer, BUILTIN.DF(tl.item) AS item, acc.fullname AS account, BUILTIN.DF(tl.class) AS class, tl.netamount AS amount, tl.quantity AS quantity FROM transaction t, transactionline tl, account acc WHERE tl.transaction = t.id AND acc.id = tl.account AND t.type = 'CustInvc' AND tl.mainline = 'F' AND tl.taxline = 'F' AND t.trandate >= TO_DATE('${start}','YYYY-MM-DD') ORDER BY t.trandate ${dir}, t.id`;
   const map=r=>({ date:r.date, invoice:r.invoice, customer:r.customer, item:r.item, account:r.account, class:r.class, amount:+r.amount||0, quantity:+r.quantity||0 });
   if(paged){
     // one page (1000 rows) at a time — the dashboard loops these, so no single request can time out
