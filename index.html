@@ -2442,9 +2442,21 @@ function renderDiag(){
       <div class="card"><div class="k">Carry an owner tag</div><div class="v">${tagged}</div></div></div>
     <div class="panel"><h3>Account-manager tags found</h3><div class="twrap" style="max-height:240px"><table><thead><tr><th>Tag</th><th class="num">Accounts</th></tr></thead><tbody>
     ${Object.entries(atc).sort((a,b)=>b[1]-a[1]).map(([t,n])=>`<tr><td>${esc(t)}</td><td class="num">${n}</td></tr>`).join('')||'<tr><td colspan=2 class="hint">No owner tags detected.</td></tr>'}</tbody></table></div></div>
-    <div class="panel"><h3>Owner column (the reliable source of the manager)</h3><div class="hint">Distinct values from Nimble's owner column, with how the dashboard maps each to an account manager. If "maps to" is blank for a real manager, tell me the exact owner text and I will add it to the mapping.</div>
-    <div class="twrap" style="max-height:340px"><table><thead><tr><th>Owner ID in Nimble</th><th class="num">Accounts</th><th>Maps to</th><th>Example company (cross-check in Nimble)</th></tr></thead><tbody>
-    ${(function(){const oc={},ex={};accs.forEach(a=>{const id=(a.owner_id!=null?String(a.owner_id):'').trim();const o=id||(a.owner_name||'').toString().trim()||'(blank)';oc[o]=(oc[o]||0)+1;if(!ex[o]&&a.name)ex[o]=a.name;});return Object.entries(oc).sort((a,b)=>b[1]-a[1]).map(([o,n])=>{const maps=amFromOwnerId(o)||amFromOwner(o);return `<tr><td style="font-family:monospace;font-size:11px">${esc(o)}</td><td class="num">${n}</td><td>${maps?esc(maps):'<span class="hint" style="margin:0">no match</span>'}</td><td class="hint" style="margin:0">${esc(ex[o]||'')}</td></tr>`;}).join('');})()||'<tr><td colspan=4 class="hint">No owner column data came through.</td></tr>'}
+    <div class="panel"><h3>Owner column (the reliable source of the manager)</h3><div class="hint">Each owner ID from Nimble, how many of its accounts are active NetSuite clients (revenue in the last 12 months), and up to 5 of those companies so you can open them in Nimble and confirm the owner. "All accounts" includes opportunities that never became clients.</div>
+    <div class="twrap" style="max-height:420px"><table><thead><tr><th>Owner ID in Nimble</th><th class="num">Active clients</th><th class="num">All accounts</th><th>Maps to</th><th>5 active companies (revenue in last 12m — cross-check in Nimble)</th></tr></thead><tbody>
+    ${(function(){
+      const idx=(hasData)?PIPE.buildIndex(C.slice(0,NC0)):null;
+      const oc={}, active={}, cos={};
+      accs.forEach(a=>{ const id=(a.owner_id!=null?String(a.owner_id):'').trim()||(a.owner_name||'').toString().trim()||'(blank)'; oc[id]=(oc[id]||0)+1;
+        // match this Nimble account to a NetSuite client with recent revenue
+        if(idx){ let cn=(cI[a.name]!==undefined)?a.name:null; if(!cn){ const mm=PIPE.matchSite(a.name,idx); if(mm.name&&mm.score>=0.85)cn=mm.name; }
+          if(cn){ const m=metaByC[cn]; if(m&&isActive(m)){ active[id]=(active[id]||0)+1; (cos[id]=cos[id]||[]); if(cos[id].length<5&&cos[id].indexOf(cn)<0)cos[id].push(cn); } } }
+      });
+      return Object.entries(oc).sort((a,b)=>(active[b[0]]||0)-(active[a[0]]||0)||b[1]-a[1]).map(([o,n])=>{
+        const maps=amFromOwnerId(o)||amFromOwner(o);
+        return `<tr><td style="font-family:monospace;font-size:11px">${esc(o)}</td><td class="num">${active[o]||0}</td><td class="num">${n}</td><td>${maps?esc(maps):'<span class="hint" style="margin:0">no match</span>'}</td><td class="hint" style="margin:0">${esc((cos[o]||[]).join(', '))||'<span class="hint">—</span>'}</td></tr>`;
+      }).join('');
+    })()||'<tr><td colspan=5 class="hint">No owner column data came through.</td></tr>'}
     </tbody></table></div></div>
     <div class="panel"><h3>Sample Nimble account names</h3><div class="hint">Compare these to the NetSuite customer names above; the naming differences are what break auto-matching.</div>
     <div class="twrap" style="max-height:280px"><table><thead><tr><th>Account</th><th>Owner column</th></tr></thead><tbody>${accs.slice(0,25).map(a=>`<tr><td>${esc(a.name||'')}</td><td class="hint" style="margin:0">${esc(a.owner_name||a.owner_id||'')}</td></tr>`).join('')}</tbody></table></div></div>`;
@@ -2664,9 +2676,11 @@ const OWNER_ID_MAP={
   '66e9eb62a138cecfe5899efd':'Simon Collins',
   '6819db274273b7d185dd9729':'Emil Badea',
   '678e391361fa4a4458717319':'David Groark',
-  '61d58631faf5216b51d3e19c':'David McDonald',
-  '5e21c591f92ea14034649568':'Eamon Gallagher'
-  /* pending: David Flood, Eoghan Johnson — add their IDs once identified */
+  '5e21c591f92ea14034649568':'Eamon Gallagher',
+  '5c4cd46f94c7bcfa7230ec97':'David Flood',
+  '685a5f53bd065a4d2592da53':'Eoghan Johnson',
+  '685a5f5474e3cdb2ebb830bd':'David McDonald',
+  '61d58631faf5216b51d3e19c':"Derek O'Callaghan"  /* was mis-labelled David McDonald; verify with the sample companies */
 };
 function amFromOwnerId(id){ return (id!=null&&OWNER_ID_MAP[String(id)])||''; }
 function amFromOwner(ownerName){
