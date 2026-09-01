@@ -1565,27 +1565,23 @@ function d2s(v){
    JSON script tag, so the dashboard classifies the raw NetSuite feed itself and
    the workbook is no longer required. */
 let _MAPIX=null;
-function _leafOf(a){ const p=String(a||'').split(' : '); return p[p.length-1].trim(); }
 function mapIndex(){
   if(_MAPIX) return _MAPIX;
   let B; try{ B=JSON.parse(document.getElementById('itieMapBundle').textContent); }catch(e){ B={entries:[],client:{},dev:[]}; }
-  const key={},ai={},ic={},item={};
+  const full={},ai={},ic={},item={};
   for(const e of (B.entries||[])){
-    const a=e[0],i=e[1],c=e[2]; const v={acct:a,fam:e[3]||'',tier:e[4]||'',cad:e[5]||'',cat:e[6]||'No',voip:e[7]||'No'};
-    const lf=_leafOf(a);
-    key[a+'|'+i+'|'+c]=v;            // full account path key
-    if(!(lf+'|'+i+'|'+c in key)) key[lf+'|'+i+'|'+c]=v;   // leaf key (NetSuite sends the leaf)
+    const a=e[0],i=e[1],c=e[2]; const v={fam:e[3]||'',tier:e[4]||'',cad:e[5]||'',cat:e[6]||'No',voip:e[7]||'No'};
+    full[a+'|'+i+'|'+c]=v;
     const kai=a+'|'+i; if(!(kai in ai)) ai[kai]=v;
-    const kli=lf+'|'+i; if(!(kli in ai)) ai[kli]=v;
     const kic=i+'|'+c; if(!(kic in ic)) ic[kic]=v;
     if(!(i in item)) item[i]=v;
   }
-  _MAPIX={key,ai,ic,item,client:B.client||{},dev:B.dev||[]};
+  _MAPIX={full,ai,ic,item,client:B.client||{},dev:B.dev||[]};
   return _MAPIX;
 }
 function classifyLine(account,item,cls){
   const X=mapIndex();
-  return X.key[account+'|'+item+'|'+cls] || X.ai[account+'|'+item] || X.ic[item+'|'+cls] || X.item[item] || {acct:account,fam:'',tier:'',cad:'',cat:'No',voip:'No'};
+  return X.full[account+'|'+item+'|'+cls] || X.ai[account+'|'+item] || X.ic[item+'|'+cls] || X.item[item] || {fam:'',tier:'',cad:'',cat:'No',voip:'No'};
 }
 function netsuiteToSheets(feed,say){
   if(say)say('Classifying NetSuite invoices with your service mapping…');
@@ -1598,7 +1594,7 @@ function netsuiteToSheets(feed,say){
     const cm=X.client[cust]||null;
     const master=(cm&&cm[0])||cust, branch=(cm&&cm[1])||cust;
     return { Date:r.date, Master_Company:master, Branch_Name:branch,
-      Account:(m.acct||account), Item:item, Class:cls,
+      Account:account, Item:item, Class:cls,
       Amount:-(+r.amount||0), Quantity:-(+r.quantity||0),   // NetSuite books invoices negative; flip to positive revenue
       Service_Family:m.fam||'', Service_Tier:m.tier||'', Billing_Cadence:m.cad||'',
       Includes_CAT_CSAT:m.cat||'No', Includes_VoIP:m.voip||'No' };
