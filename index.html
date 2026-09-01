@@ -2443,8 +2443,8 @@ function renderDiag(){
     <div class="panel"><h3>Account-manager tags found</h3><div class="twrap" style="max-height:240px"><table><thead><tr><th>Tag</th><th class="num">Accounts</th></tr></thead><tbody>
     ${Object.entries(atc).sort((a,b)=>b[1]-a[1]).map(([t,n])=>`<tr><td>${esc(t)}</td><td class="num">${n}</td></tr>`).join('')||'<tr><td colspan=2 class="hint">No owner tags detected.</td></tr>'}</tbody></table></div></div>
     <div class="panel"><h3>Owner column (the reliable source of the manager)</h3><div class="hint">Distinct values from Nimble's owner column, with how the dashboard maps each to an account manager. If "maps to" is blank for a real manager, tell me the exact owner text and I will add it to the mapping.</div>
-    <div class="twrap" style="max-height:280px"><table><thead><tr><th>Owner in Nimble</th><th class="num">Accounts</th><th>Maps to</th></tr></thead><tbody>
-    ${(function(){const oc={};accs.forEach(a=>{const o=(a.owner_name||a.owner_id||'').toString().trim()||'(blank)';oc[o]=(oc[o]||0)+1;});return Object.entries(oc).sort((a,b)=>b[1]-a[1]).map(([o,n])=>`<tr><td>${esc(o)}</td><td class="num">${n}</td><td>${esc(amFromOwner(o)||(o==='(blank)'?'':'<span class=hint>no match</span>'))}</td></tr>`).join('');})()||'<tr><td colspan=3 class="hint">No owner column data came through. The Nimble feed may not expose it, in which case tell me and we will read it another way.</td></tr>'}
+    <div class="twrap" style="max-height:340px"><table><thead><tr><th>Owner ID in Nimble</th><th class="num">Accounts</th><th>Maps to</th><th>Example company (cross-check in Nimble)</th></tr></thead><tbody>
+    ${(function(){const oc={},ex={};accs.forEach(a=>{const id=(a.owner_id!=null?String(a.owner_id):'').trim();const o=id||(a.owner_name||'').toString().trim()||'(blank)';oc[o]=(oc[o]||0)+1;if(!ex[o]&&a.name)ex[o]=a.name;});return Object.entries(oc).sort((a,b)=>b[1]-a[1]).map(([o,n])=>{const maps=amFromOwnerId(o)||amFromOwner(o);return `<tr><td style="font-family:monospace;font-size:11px">${esc(o)}</td><td class="num">${n}</td><td>${maps?esc(maps):'<span class="hint" style="margin:0">no match</span>'}</td><td class="hint" style="margin:0">${esc(ex[o]||'')}</td></tr>`;}).join('');})()||'<tr><td colspan=4 class="hint">No owner column data came through.</td></tr>'}
     </tbody></table></div></div>
     <div class="panel"><h3>Sample Nimble account names</h3><div class="hint">Compare these to the NetSuite customer names above; the naming differences are what break auto-matching.</div>
     <div class="twrap" style="max-height:280px"><table><thead><tr><th>Account</th><th>Owner column</th></tr></thead><tbody>${accs.slice(0,25).map(a=>`<tr><td>${esc(a.name||'')}</td><td class="hint" style="margin:0">${esc(a.owner_name||a.owner_id||'')}</td></tr>`).join('')}</tbody></table></div></div>`;
@@ -2560,7 +2560,7 @@ function mergeCRM(){
       }
     }
     const cl=accCls(acc);
-    const ownerAm=amFromOwner(acc.owner_name);
+    const ownerAm=amFromOwnerId(acc.owner_id)||amFromOwner(acc.owner_name);
     if(client){ attach[client]={tags:acc.tags||[],active:true,dormant:cl.dormant,crmAm:(ownerAm||cl.am||''),crmId:acc.crmId,crmName:nm,ownerRaw:acc.owner_name||''}; }
     else if(cl.active){ migrating.push(acc); }
   }
@@ -2659,6 +2659,16 @@ function classifyTags(tags){
   return {active,dormant,amCode,am};
 }
 function accCls(a){ return a._cls || (a._cls=classifyTags(a.tags)); }
+const OWNER_ID_MAP={
+  '6615cb2a14140ee9e7db2099':'Michael Daly',
+  '66e9eb62a138cecfe5899efd':'Simon Collins',
+  '6819db274273b7d185dd9729':'Emil Badea',
+  '678e391361fa4a4458717319':'David Groark',
+  '61d58631faf5216b51d3e19c':'David McDonald',
+  '5e21c591f92ea14034649568':'Eamon Gallagher'
+  /* pending: David Flood, Eoghan Johnson — add their IDs once identified */
+};
+function amFromOwnerId(id){ return (id!=null&&OWNER_ID_MAP[String(id)])||''; }
 function amFromOwner(ownerName){
   if(!ownerName) return '';
   const canon=canonAM(ownerName); const vals=Object.values(AM_ROSTER);
