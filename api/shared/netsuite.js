@@ -32,11 +32,12 @@ async function suiteql(c,q,limit,offset){
 async function getNetsuiteData(opts){
   opts=opts||{}; const c=creds();
   const start=process.env.NETSUITE_START_DATE||'2023-01-01';
+  const from=opts.from||start, to=opts.to||null;
   // acc.fullname gives the full account path ("Sales Recurring : Backup : ..."),
   // which the dashboard needs both to scope revenue and to match the mapping.
   const paged = opts.page!=null && opts.page>=0;
   const dir = (paged||opts.full===true) ? 'ASC' : 'DESC';
-  const q=`SELECT TO_CHAR(t.trandate,'YYYY-MM-DD') AS date, t.tranid AS invoice, BUILTIN.DF(t.entity) AS customer, BUILTIN.DF(tl.item) AS item, BUILTIN.DF(tl.account) AS account, BUILTIN.DF(tl.class) AS class, tl.netamount AS amount, tl.quantity AS quantity FROM transaction t, transactionline tl WHERE tl.transaction = t.id AND t.type = 'CustInvc' AND tl.mainline = 'F' AND tl.taxline = 'F' AND t.trandate >= TO_DATE('${start}','YYYY-MM-DD') ORDER BY t.trandate ${dir}, t.id`;
+  const q=`SELECT TO_CHAR(t.trandate,'YYYY-MM-DD') AS date, t.tranid AS invoice, BUILTIN.DF(t.entity) AS customer, BUILTIN.DF(tl.item) AS item, BUILTIN.DF(tl.account) AS account, BUILTIN.DF(tl.class) AS class, tl.netamount AS amount, tl.quantity AS quantity FROM transaction t, transactionline tl WHERE tl.transaction = t.id AND t.type = 'CustInvc' AND tl.mainline = 'F' AND tl.taxline = 'F' AND t.trandate >= TO_DATE('${from}','YYYY-MM-DD') ${to?"AND t.trandate < TO_DATE('"+to+"','YYYY-MM-DD')":''} ORDER BY t.trandate ${dir}, t.id`;
   const map=r=>({ date:r.date, invoice:r.invoice, customer:r.customer, item:r.item, account:r.account, class:r.class, amount:+r.amount||0, quantity:+r.quantity||0 });
   if(paged){
     // one page (1000 rows) at a time — the dashboard loops these, so no single request can time out

@@ -1650,18 +1650,22 @@ async function loadFromFeed(url,say){
   say('Requesting the latest data feed…');
   const isNetSuite=/netsuite/i.test(url);
   if(isNetSuite){
-    // page through the feed so no single request can time out, then classify
+    // pull year-by-year so no single window hits NetSuite's offset cap, then classify
     const base=url.split('?')[0];
-    let all=[],page=0,hasMore=true,guard=0;
-    while(hasMore && guard<300){
-      say('Pulling NetSuite invoices, page '+(page+1)+' ('+all.length.toLocaleString()+' lines so far)…');
-      const res=await fetch(base+'?page='+page,{credentials:'include',cache:'no-store'});
-      if(!res.ok){ const t=await res.text().catch(()=> ''); throw new Error('NetSuite feed failed ('+res.status+'). '+t.slice(0,160)); }
-      const j=await res.json();
-      if(j&&j.rows){ all=all.concat(j.rows); hasMore=!!j.hasMore; } else { throw new Error('Unexpected NetSuite feed response.'); }
-      page++; guard++;
+    let all=[]; const nowY=new Date().getFullYear();
+    for(let y=2023; y<=nowY; y++){
+      const from=y+'-01-01', to=(y+1)+'-01-01';
+      let page=0,hasMore=true,guard=0;
+      while(hasMore && guard<150){
+        say('Pulling NetSuite invoices '+y+' ('+all.length.toLocaleString()+' lines so far)…');
+        const res=await fetch(base+'?from='+from+'&to='+to+'&page='+page,{credentials:'include',cache:'no-store'});
+        if(!res.ok){ const t=await res.text().catch(()=> ''); throw new Error('NetSuite feed failed ('+res.status+'). '+t.slice(0,160)); }
+        const j=await res.json();
+        if(j&&j.rows){ all=all.concat(j.rows); hasMore=!!j.hasMore; } else { throw new Error('Unexpected NetSuite feed response.'); }
+        page++; guard++;
+      }
     }
-    DIAG_NS={rows:all, pulledAt:new Date().toISOString(), pages:page};
+    DIAG_NS={rows:all, pulledAt:new Date().toISOString()};
     return mapSheets(netsuiteToSheets({source:'netsuite',rows:all},say),say);
   }
   const res=await fetch(url,{credentials:'include',cache:'no-store'});
@@ -2438,8 +2442,12 @@ function renderDiag(){
       <div class="card"><div class="k">Carry an owner tag</div><div class="v">${tagged}</div></div></div>
     <div class="panel"><h3>Account-manager tags found</h3><div class="twrap" style="max-height:240px"><table><thead><tr><th>Tag</th><th class="num">Accounts</th></tr></thead><tbody>
     ${Object.entries(atc).sort((a,b)=>b[1]-a[1]).map(([t,n])=>`<tr><td>${esc(t)}</td><td class="num">${n}</td></tr>`).join('')||'<tr><td colspan=2 class="hint">No owner tags detected.</td></tr>'}</tbody></table></div></div>
+    <div class="panel"><h3>Owner column (the reliable source of the manager)</h3><div class="hint">Distinct values from Nimble's owner column, with how the dashboard maps each to an account manager. If "maps to" is blank for a real manager, tell me the exact owner text and I will add it to the mapping.</div>
+    <div class="twrap" style="max-height:280px"><table><thead><tr><th>Owner in Nimble</th><th class="num">Accounts</th><th>Maps to</th></tr></thead><tbody>
+    ${(function(){const oc={};accs.forEach(a=>{const o=(a.owner_name||a.owner_id||'').toString().trim()||'(blank)';oc[o]=(oc[o]||0)+1;});return Object.entries(oc).sort((a,b)=>b[1]-a[1]).map(([o,n])=>`<tr><td>${esc(o)}</td><td class="num">${n}</td><td>${esc(amFromOwner(o)||(o==='(blank)'?'':'<span class=hint>no match</span>'))}</td></tr>`).join('');})()||'<tr><td colspan=3 class="hint">No owner column data came through. The Nimble feed may not expose it, in which case tell me and we will read it another way.</td></tr>'}
+    </tbody></table></div></div>
     <div class="panel"><h3>Sample Nimble account names</h3><div class="hint">Compare these to the NetSuite customer names above; the naming differences are what break auto-matching.</div>
-    <div class="twrap" style="max-height:280px"><table><tbody>${accs.slice(0,25).map(a=>`<tr><td>${esc(a.name||'')}</td><td class="hint" style="margin:0">${esc((a.tags||[]).filter(isAccountTag).join(', '))}</td></tr>`).join('')}</tbody></table></div></div>`;
+    <div class="twrap" style="max-height:280px"><table><thead><tr><th>Account</th><th>Owner column</th></tr></thead><tbody>${accs.slice(0,25).map(a=>`<tr><td>${esc(a.name||'')}</td><td class="hint" style="margin:0">${esc(a.owner_name||a.owner_id||'')}</td></tr>`).join('')}</tbody></table></div></div>`;
   } else {
     crmHtml='<div class="note">Nimble feed not loaded. Press <b>Load now</b> on the Nimble row.</div>';
   }
@@ -2552,7 +2560,8 @@ function mergeCRM(){
       }
     }
     const cl=accCls(acc);
-    if(client){ attach[client]={tags:acc.tags||[],active:cl.active,dormant:cl.dormant,crmAm:cl.am||'',crmId:acc.crmId,crmName:nm}; }
+    const ownerAm=amFromOwner(acc.owner_name);
+    if(client){ attach[client]={tags:acc.tags||[],active:true,dormant:cl.dormant,crmAm:(ownerAm||cl.am||''),crmId:acc.crmId,crmName:nm,ownerRaw:acc.owner_name||''}; }
     else if(cl.active){ migrating.push(acc); }
   }
   // apply to base NetSuite clients
@@ -2650,6 +2659,17 @@ function classifyTags(tags){
   return {active,dormant,amCode,am};
 }
 function accCls(a){ return a._cls || (a._cls=classifyTags(a.tags)); }
+function amFromOwner(ownerName){
+  if(!ownerName) return '';
+  const canon=canonAM(ownerName); const vals=Object.values(AM_ROSTER);
+  if(vals.includes(canon)) return canon;
+  const o=String(ownerName).toLowerCase().trim();
+  for(const v of vals){ const parts=v.toLowerCase().split(' '); const last=parts[parts.length-1], first=parts[0];
+    if(o===v.toLowerCase()) return v;
+    if(o.includes(last)&&o.includes(first)) return v;   // "Simon Collins", "collins, simon", "simon.collins@..."
+  }
+  return '';
+}
 
 function renderCrm(){
   if(!hasCrm()){ document.getElementById('pg-crm').innerHTML='<div class="lockmsg"><div class="big">🔗</div><h2>No CRM feed loaded</h2><p>Connect Nimble on the Data Hub. Once the feed is in, this section analyses your CRM on its own, with or without NetSuite.</p><button class="btn" style="margin-top:16px" onclick="go(\'data\')">Open the Data Hub</button></div>'; return; }
