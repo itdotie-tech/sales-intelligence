@@ -948,18 +948,19 @@ const PAGES=[
  ['pending','Pending Migration','M4 10h12M12 6l4 4-4 4',4],
  ['data','Data Hub','M10 3c3.9 0 7 1 7 2.5S13.9 8 10 8 3 7 3 5.5 6.1 3 10 3zM3 5.5v9c0 1.5 3.1 2.5 7 2.5s7-1 7-2.5v-9',4],
  ['diag','Feed Diagnostics','M8 4a4 4 0 104 4M13 13l4 4M3 3l14 14',4],
+ ['match','Client Matching','M4 7h8M4 11h5M14 4l3 3-3 3M4 15h12',4],
 ];
 const SECT={0:'',1:'Analysis',5:'Sales tools',2:'Drill-down',3:'Cyber posture',6:'CRM',4:'Coming across'};
 function buildNav(){
   document.getElementById('nav').innerHTML=PAGES.map(p=>{const[id,label,path,sect,sub]=p;
-    const locked=(!hasData&&id!=='data'&&id!=='pkg'&&id!=='diag'&&!((id==='crm'||id==='recon'||id==='pipeline'||id==='leads'||id==='assign')&&hasCrm()))||(id==='win10'&&hasData&&!hasAttrs)||(id==='pending'&&hasData&&!((DATA.pending||[]).length))||((id==='recon'||id==='crm'||id==='pipeline'||id==='leads'||id==='assign')&&!hasCrm());
+    const locked=(!hasData&&id!=='data'&&id!=='pkg'&&id!=='diag'&&id!=='match'&&!((id==='crm'||id==='recon'||id==='pipeline'||id==='leads'||id==='assign')&&hasCrm()))||(id==='win10'&&hasData&&!hasAttrs)||(id==='pending'&&hasData&&!((DATA.pending||[]).length))||((id==='recon'||id==='crm'||id==='pipeline'||id==='leads'||id==='assign')&&!hasCrm());
     return (SECT[sect]?`<div class="sep">${SECT[sect]}</div>`:'')+
     `<button data-p="${id}" class="${sub?'sub':''} ${locked?'locked':''}"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="${path}"/></svg><span>${label}</span></button>`;}).join('');
 }
 document.getElementById('nav').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
   if(b.classList.contains('locked')){go('data');return;} go(b.dataset.p);});
 function go(p,client){
-  if(!hasData&&p!=='data'&&p!=='pkg'&&p!=='diag')p='data';
+  if(!hasData&&p!=='data'&&p!=='pkg'&&p!=='diag'&&p!=='match')p='data';
   state.page=p; if(client!==undefined){state.c360=client;state.branch=null;}
   document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('on',b.dataset.p===p));
   document.querySelectorAll('.page').forEach(pg=>pg.classList.toggle('on',pg.id==='pg-'+p));
@@ -2486,7 +2487,96 @@ function renderDiag(){
     <h3 style="margin:28px 0 8px">Matching &amp; ownership</h3>${matchHtml}`;
 }
 
-const RENDER={diag:renderDiag,exec:renderExec,radar:renderRadar,fin:renderFin,kpi:renderKpi,c360:renderC360,price:renderPrice,gap:renderGap,m365:renderM365,posture:renderPosture,cyber:renderCyber,nis2:renderNis2,win10:renderWin10,pkg:renderPkg,am:renderAm,health:renderHealth,churn:renderChurn,crm:renderCrm,pipeline:renderPipeline,leads:renderLeads,assign:renderAssign,recon:renderRecon,pending:renderPending,data:renderData};
+const TAG_TARGET={'David Flood':142,'David Groark':102,'David McDonald':61,"Derek O'Callaghan":61,'Emil Badea':108,'Eoghan Johnson':95,'Michael Daly':110,'Simon Collins':110};
+function ownerOfAcc(acc){ return acc?(amFromOwnerId(acc.owner_id)||amFromOwner(acc.owner_name)||accCls(acc).am||''):''; }
+function setMatchCand(input){ const tr=input.closest('tr'); if(!tr)return; const cb=tr.querySelector('.mchk'); if(cb){ cb.setAttribute('data-cand',(input.value||'').trim()); cb.checked=!!(input.value||'').trim(); } }
+function matchSelectAll(v){ document.querySelectorAll('#matchTable .mchk').forEach(cb=>{ if(cb.getAttribute('data-cand')) cb.checked=v; }); }
+function confirmMatches(){
+  const patch={}; let linked=0,unlinked=0;
+  document.querySelectorAll('#matchTable tr[data-client]').forEach(tr=>{
+    const cb=tr.querySelector('.mchk'); if(!cb)return;
+    const client=cb.getAttribute('data-client'), cand=cb.getAttribute('data-cand')||'';
+    if(cb.checked && cand){ patch[cand]=client; linked++; }
+    else if(!cb.checked && cand && CRM_XWALK[cand]===client){ patch[cand]=null; unlinked++; }
+  });
+  if(!linked && !unlinked){ alert('Nothing changed to confirm.'); return; }
+  Object.assign(CRM_XWALK, patch); Object.keys(patch).forEach(k=>{ if(patch[k]===null) delete CRM_XWALK[k]; });
+  saveXwalk();
+  pushOverride({nameCrosswalk:patch}).then(()=>{ bindData(); renderMatch(); });
+  bindData(); renderMatch();
+}
+function renderMatch(){
+  const el=document.getElementById('pg-match');
+  const feed=crmFeed();
+  if(!hasData||!feed){ el.innerHTML='<h1 class="ph">Client <em>Name Matching</em></h1><div class="note">Load both the NetSuite and Nimble feeds first, then this page lines their names up.</div>'; return; }
+  const accs=feed.accounts||[];
+  const nix=PIPE.buildIndex(accs.map(a=>a.name));
+  const byName={}; accs.forEach(a=>{ if(!(a.name in byName)) byName[a.name]=a; });
+  const nimbleNames=accs.map(a=>a.name).sort((a,b)=>a.localeCompare(b));
+  const rows=[];
+  for(let i=0;i<NC0;i++){
+    const m=META[i]; if(!isActive(m)) continue;
+    const client=m.n; let confirmed=null;
+    for(const k of Object.keys(CRM_XWALK)){ if(CRM_XWALK[k]===client){ confirmed=k; break; } }
+    let cand,score,status;
+    if(confirmed){ cand=confirmed; score=1; status='green'; }
+    else { const mm=PIPE.matchSite(client,nix); cand=mm.name||''; score=mm.score||0;
+      status = score>=0.999?'green' : score>=0.6?'orange' : 'red'; }
+    const acc=cand?byName[cand]:null;
+    const owner=acc?(ownerOfAcc(acc)||'Unassigned'):ownerOf(client);
+    rows.push({client,cand,score,status,owner,mrr:totMRR(m)});
+  }
+  const rank={red:0,orange:1,green:2};
+  rows.sort((a,b)=>rank[a.status]-rank[b.status] || b.mrr-a.mrr);
+  const g=rows.filter(r=>r.status==='green').length, o=rows.filter(r=>r.status==='orange').length, rd=rows.filter(r=>r.status==='red').length;
+  const unass=rows.filter(r=>!r.owner||r.owner==='Unassigned').length;
+  // owner alignment vs tag targets
+  const asg={}; rows.forEach(r=>{ if(r.owner&&r.owner!=='Unassigned') asg[r.owner]=(asg[r.owner]||0)+1; });
+  const mgrs=[...new Set([...Object.keys(TAG_TARGET),...Object.keys(asg)])].sort();
+  const pill=s=>`<span style="display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:700;background:${s==='green'?'rgba(47,191,113,.18);color:#5fe0a0':s==='orange'?'rgba(249,194,13,.18);color:#f9c20d':'rgba(229,72,77,.18);color:#ff8a8d'}">${s==='green'?'Exact':s==='orange'?'Likely':'No match'}</span>`;
+  el.innerHTML=`<h1 class="ph">Client <em>Name Matching</em></h1>
+  <p class="psub">Every active NetSuite client lined up against Nimble. Green is an exact or already-agreed match, orange is a likely match worth a glance, red needs you to pick the right Nimble account. Green and orange are ticked for you; untick anything wrong. Confirming saves the agreed matches centrally, so they hold for everyone and the owner carries to every branch.</p>
+  <div class="grid cards">
+    <div class="card"><div class="k">Exact</div><div class="v pos">${g}</div><div class="s">green</div></div>
+    <div class="card ${o?'hl':''}"><div class="k">Likely</div><div class="v warn">${o}</div><div class="s">orange, please glance</div></div>
+    <div class="card ${rd?'hl':''}"><div class="k">No match</div><div class="v ${rd?'neg':''}">${rd}</div><div class="s">red, needs a pick</div></div>
+    <div class="card"><div class="k">Still unassigned</div><div class="v ${unass?'neg':''}">${unass}</div><div class="s">no owner yet</div></div>
+  </div>
+  <div class="panel"><h3>Owner alignment against your Nimble tag counts</h3><div class="hint">How many active clients currently resolve to each manager, next to the tagged-account count you gave. Close is good; a large gap points to unmatched names below.</div>
+  <div class="twrap" style="max-height:300px"><table><thead><tr><th>Manager</th><th class="num">Assigned now</th><th class="num">Tagged in Nimble</th><th class="num">Gap</th></tr></thead><tbody>
+  ${mgrs.map(mgr=>{const a=asg[mgr]||0,t=TAG_TARGET[mgr]||0,gap=a-t;return `<tr><td>${esc(mgr)}</td><td class="num">${a}</td><td class="num">${t||'—'}</td><td class="num" style="color:${Math.abs(gap)>15?'#ff8a8d':Math.abs(gap)>5?'#f9c20d':'#5fe0a0'}">${t?(gap>0?'+':'')+gap:''}</td></tr>`;}).join('')}
+  </tbody></table></div></div>
+  <div class="panel"><h3>Matches to confirm</h3>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:6px 0 12px">
+    <input id="matchSearch" placeholder="Search clients…" autocomplete="off" oninput="filterMatchRows(this.value)" style="width:260px;background:var(--panel);border:1px solid var(--line);color:#fff;border-radius:8px;padding:8px 12px">
+    <label style="font-size:13px;color:var(--mut2);cursor:pointer"><input type="checkbox" id="matchRedOnly" onchange="filterMatchRows(document.getElementById('matchSearch').value)"> Show only red/unassigned</label>
+    <span style="flex:1"></span>
+    <button class="btn" style="background:#2a3550" onclick="matchSelectAll(true)">Tick all</button>
+    <button class="btn" style="background:#2a3550" onclick="matchSelectAll(false)">Untick all</button>
+    <button class="btn" onclick="confirmMatches()">Confirm ticked matches</button>
+  </div>
+  <datalist id="nimbleNames">${nimbleNames.map(n=>`<option value="${esc(n)}">`).join('')}</datalist>
+  <div class="twrap" style="max-height:560px" id="matchTable"><table><thead><tr><th>✓</th><th>Status</th><th>NetSuite client</th><th class="num">MRR</th><th>Nimble account</th><th>Owner</th></tr></thead><tbody>
+  ${rows.map(r=>{const editable=(r.status!=='green');const un=(!r.owner||r.owner==='Unassigned');return `<tr data-client="${esc(r.client)}" data-status="${r.status}" data-un="${un?1:0}">
+    <td><input type="checkbox" class="mchk" data-client="${esc(r.client)}" data-cand="${esc(r.cand||'')}" ${r.status!=='red'?'checked':''}></td>
+    <td>${pill(r.status)}</td>
+    <td class="clink" onclick="goClient('${jsq(r.client)}')">${esc(r.client)}</td>
+    <td class="num">${fmtE(r.mrr)}</td>
+    <td>${editable?`<input list="nimbleNames" value="${esc(r.cand||'')}" onchange="setMatchCand(this)" placeholder="pick a Nimble account…" style="width:280px;background:var(--panel);border:1px solid var(--line);color:#fff;border-radius:7px;padding:6px 9px">`:esc(r.cand||'')} ${r.status==='orange'?`<span class="hint" style="margin:0">${Math.round(r.score*100)}%</span>`:''}</td>
+    <td>${un?'<span class="warn">Unassigned</span>':esc(r.owner)}</td></tr>`;}).join('')}
+  </tbody></table></div></div>
+  <div class="panel"><h3>Manual mapping notes</h3><div class="hint">Free text for anything that needs a human note, decisions, odd names, one-offs. Saved centrally with your matches.</div>
+  <textarea id="matchNotes" style="width:100%;min-height:90px;background:var(--panel);border:1px solid var(--line);color:#fff;border-radius:8px;padding:10px" oninput="matchNotesDirty=true">${esc((window.__matchNotes)||'')}</textarea>
+  <div style="margin-top:8px"><button class="btn" onclick="saveMatchNotes()">Save notes</button></div></div>`;
+  const ss=document.getElementById('matchSearch'); if(ss&&matchFilter){ ss.value=matchFilter; filterMatchRows(matchFilter); }
+}
+let matchFilter='', matchNotesDirty=false;
+function filterMatchRows(q){ matchFilter=q||''; q=(q||'').toLowerCase(); const redOnly=document.getElementById('matchRedOnly'); const ro=redOnly&&redOnly.checked;
+  document.querySelectorAll('#matchTable tbody tr').forEach(tr=>{ const n=(tr.getAttribute('data-client')||'').toLowerCase(); const st=tr.getAttribute('data-status'); const un=tr.getAttribute('data-un')==='1';
+    const okQ=!q||n.indexOf(q)>=0; const okR=!ro||st==='red'||un; tr.style.display=(okQ&&okR)?'':'none'; }); }
+function saveMatchNotes(){ const t=document.getElementById('matchNotes'); if(!t)return; window.__matchNotes=t.value; pushOverride({clientRenames:{'__matchNotes__':t.value||null}}); matchNotesDirty=false; }
+
+const RENDER={match:renderMatch,diag:renderDiag,exec:renderExec,radar:renderRadar,fin:renderFin,kpi:renderKpi,c360:renderC360,price:renderPrice,gap:renderGap,m365:renderM365,posture:renderPosture,cyber:renderCyber,nis2:renderNis2,win10:renderWin10,pkg:renderPkg,am:renderAm,health:renderHealth,churn:renderChurn,crm:renderCrm,pipeline:renderPipeline,leads:renderLeads,assign:renderAssign,recon:renderRecon,pending:renderPending,data:renderData};
 
 /* ================= CRM (Nimble) merge layer ================= */
 const AM_ROSTER={DF:'David Flood',DG:'David Groark',DMcD:'David McDonald',DOC:"Derek O'Callaghan",EB:'Emil Badea',EJ:'Eoghan Johnson',SC:'Simon Collins',MD:'Michael Daly'};
@@ -2519,6 +2609,7 @@ async function loadCentralOverrides(){
     Object.assign(OWNER_OVR, d.ownerOverrides||{});
     Object.assign(CRM_XWALK, d.nameCrosswalk||{});
     Object.assign(CLIENT_RENAME, d.clientRenames||{});
+    if(d.clientRenames&&d.clientRenames['__matchNotes__']!=null){ window.__matchNotes=d.clientRenames['__matchNotes__']; }
     CENTRAL_META={updatedAt:d.updatedAt||null,updatedBy:d.updatedBy||null,synced:true};
     try{ localStorage.setItem('itie3_owner',JSON.stringify(OWNER_OVR));
          localStorage.setItem('itie3_crm_xwalk',JSON.stringify(CRM_XWALK));
@@ -2994,7 +3085,7 @@ function renderRecon(){
   const _rs=document.getElementById('reconSearch'); if(_rs&&reconFilter){ _rs.value=reconFilter; } filterReconRows(reconFilter);
 }
 
-function refresh(){if(!hasData&&state.page!=='pkg'&&state.page!=='diag'&&!(['crm','recon','pipeline','leads','assign'].includes(state.page)&&hasCrm())){renderData();return;}RENDER[state.page]();}
+function refresh(){if(!hasData&&state.page!=='pkg'&&state.page!=='diag'&&state.page!=='match'&&!(['crm','recon','pipeline','leads','assign'].includes(state.page)&&hasCrm())){renderData();return;}RENDER[state.page]();}
 bindData();buildNav();
 loadCentralOverrides().then(loaded=>{ if(loaded){ if(hasData){ bindData(); buildNav(); rebuildOwnerFilter(); } if(state.page)refresh(); } });
 if(hasData){
