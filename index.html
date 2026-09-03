@@ -837,6 +837,7 @@ const SVC_LABEL={MIT:'Managed IT',RMIT:'Remote Managed IT',M365:'Microsoft 365',
 
 function totMRR(m){return Object.values(m.mrr).reduce((a,b)=>a+b,0);}
 function isActive(m){return totMRR(m)>50;}
+function isClient(m){ return !!(m && m.n); }  /* every NetSuite/CRM client counts for assignment, active or not */
 function isManaged(m){return (m.mrr.MIT||0)>0||(m.mrr.RMIT||0)>0;}
 function has(m,c){return (m.caps||[]).includes(c);}
 function hasM365(m){return (m.mrr.M365||0)>0&&m.seats>0;}
@@ -2517,7 +2518,7 @@ function renderMatch(){
   const nimbleNames=accs.map(a=>a.name).sort((a,b)=>a.localeCompare(b));
   const rows=[];
   for(let i=0;i<NC0;i++){
-    const m=META[i]; if(!isActive(m)) continue;
+    const m=META[i]; if(!isClient(m)) continue;
     const client=m.n; let confirmed=null;
     for(const k of Object.keys(CRM_XWALK)){ if(CRM_XWALK[k]===client){ confirmed=k; break; } }
     let cand,score,status;
@@ -2604,7 +2605,7 @@ function renderOwnerMap(){
   accs.forEach(a=>{ const id=(a.owner_id!=null?String(a.owner_id):''); if(!id)return;
     let cn=(cI[a.name]!==undefined)?a.name:(CRM_XWALK[a.name]||null);
     if(!cn){ const mm=PIPE.matchSite(a.name,idx); if(mm.name&&mm.score>=0.85)cn=mm.name; }
-    if(!cn)return; const m=metaByC[cn]; if(!m||!isActive(m))return;
+    if(!cn)return; const m=metaByC[cn]; if(!m||!isClient(m))return;
     (groups[id]=groups[id]||{clients:[]}); if(!groups[id].clients.some(x=>x.client===cn)) groups[id].clients.push({client:cn,nimbleName:a.name});
   });
   const ids=Object.keys(groups).sort((a,b)=>groups[b].clients.length-groups[a].clients.length);
@@ -3094,7 +3095,7 @@ function renderRecon(){
     return; }
   const clientOpts=[...C].sort((a,b)=>a.localeCompare(b));
   const optList=(sel)=>clientOpts.map(c=>`<option value="${esc(c)}"${c===sel?' selected':''}>${esc(c)}</option>`).join('');
-  const roster=META.filter(m=>isActive(m)||m.migrating).sort((a,b)=>{const ua=ownerOf(a.n)==='Unassigned',ub=ownerOf(b.n)==='Unassigned';if(ua!==ub)return ua?-1:1;const oa=ownerOf(a.n),ob=ownerOf(b.n);return oa!==ob?oa.localeCompare(ob):a.n.localeCompare(b.n);});
+  const roster=META.filter(m=>isClient(m)||m.migrating).sort((a,b)=>{const ua=ownerOf(a.n)==='Unassigned',ub=ownerOf(b.n)==='Unassigned';if(ua!==ub)return ua?-1:1;const oa=ownerOf(a.n),ob=ownerOf(b.n);return oa!==ob?oa.localeCompare(ob):a.n.localeCompare(b.n);});
   const unCount=roster.filter(m=>ownerOf(m.n)==='Unassigned').length;
   document.getElementById('pg-recon').innerHTML=`
   <h1 class="ph">Account <em>Reconciliation</em></h1>
