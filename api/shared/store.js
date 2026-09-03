@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const CONTAINER = process.env.DATASET_CONTAINER || 'data-sync';
 const BLOB = 'overrides.json';
 const VERSION = '2021-08-06';
-const EMPTY = { ownerOverrides:{}, nameCrosswalk:{}, clientRenames:{}, updatedAt:null, updatedBy:null };
+const EMPTY = { ownerOverrides:{}, nameCrosswalk:{}, clientRenames:{}, ownerIdMap:{}, updatedAt:null, updatedBy:null };
 
 function conn(){
   const cs = process.env.AZURE_STORAGE_CONNECTION_STRING;
@@ -51,8 +51,9 @@ async function writeOverrides(obj){
 function applyPatch(cur, patch){
   const out={ ownerOverrides:{...cur.ownerOverrides,...(patch.ownerOverrides||{})},
     nameCrosswalk:{...cur.nameCrosswalk,...(patch.nameCrosswalk||{})},
-    clientRenames:{...cur.clientRenames,...(patch.clientRenames||{})} };
-  for(const g of ['ownerOverrides','nameCrosswalk','clientRenames']) for(const k of Object.keys(patch[g]||{})) if(patch[g][k]===null) delete out[g][k];
+    clientRenames:{...cur.clientRenames,...(patch.clientRenames||{})},
+    ownerIdMap:{...(cur.ownerIdMap||{}),...(patch.ownerIdMap||{})} };
+  for(const g of ['ownerOverrides','nameCrosswalk','clientRenames','ownerIdMap']) for(const k of Object.keys(patch[g]||{})) if(patch[g][k]===null) delete out[g][k];
   return out;
 }
 module.exports = { readOverrides, writeOverrides, applyPatch, EMPTY };

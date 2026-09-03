@@ -1,4 +1,4 @@
-const AM_ROSTER = { DF:'David Flood', DG:'David Groark', DMcD:'David McDonald', DOC:"Derek O'Callaghan", EB:'Emil Badea', EJ:'Eoghan Johnson', SC:'Simon Collins', MD:'Michael Daly' };
+const AM_ROSTER = { DF:'David Flood', DG:'David Groark', DMcD:'David McDonald', DOC:"Derek O'Callaghan", EB:'Emil Badea', EJ:'Eoghan Johnson', SC:'Simon Collins', MD:'Michael Daly', EG:'Eamon Gallagher' };
 function classifyTag(tag){ if(!tag||!/accounts?/i.test(tag)) return null; const dormant=/\(\s*d\s*\)/i.test(tag); const codes=Object.keys(AM_ROSTER).sort((a,b)=>b.length-a.length); for(const code of codes){ const re=new RegExp('(^|[^a-z])'+code.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'([^a-z]|$)','i'); if(re.test(tag)) return {code,am:AM_ROSTER[code],dormant}; } return null; }
 function resolveAccount(tags){ const a=[],d=[]; (tags||[]).forEach(t=>{const c=classifyTag(t); if(!c)return; (c.dormant?d:a).push(c);}); if(a.length)return{active:true,dormant:false,amCode:a[0].code,am:a[0].am}; if(d.length)return{active:false,dormant:true,amCode:d[0].code,am:d[0].am}; return{active:false,dormant:false,amCode:null,am:''}; }
 module.exports = { AM_ROSTER, resolveAccount, classifyTag };
