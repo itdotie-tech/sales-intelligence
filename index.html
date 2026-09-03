@@ -930,6 +930,7 @@ function radarCard(x){
 <script>
 /* ============ nav & filter bar ============ */
 const PAGES=[
+ ['action','Action Centre','M10 2a6 6 0 00-6 6c0 4-2 5-2 5h16s-2-1-2-5a6 6 0 00-6-6zM8 17a2 2 0 004 0',1],
  ['exec','Exec Overview','M3 13l4-4 4 3 6-7',0],
  ['radar','Opportunity Radar','M10 2a8 8 0 108 8',0],
  ['fin','Financial Analysis','M4 16V8m6 8V4m6 12v-6',1],
@@ -945,10 +946,7 @@ const PAGES=[
  ['posture','Cyber Posture','M10 2l7 3v5c0 5-3.5 7.5-7 8-3.5-.5-7-3-7-8V5zM7 10l2 2 4-4',3],
  ['cyber','CyberProtect Radar','M10 2l7 3v5c0 5-3.5 7.5-7 8-3.5-.5-7-3-7-8V5z',0,'sub'],
  ['nis2','NIS2 Compliance','M6 2h8l2 3v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5z M8 9h4M8 12h4',0,'sub'],
- ['win10','Windows 10 Risk','M3 5l6-1v6H3zM10 4l7-1v7h-7zM3 11h6v6l-6-1zM10 11h7v7l-7-1',0,'sub'],
  ['crm','CRM Overview','M10 3a4 4 0 100 8 4 4 0 000-8zM3 17a7 7 0 0114 0',6],
- ['pipeline','Pipeline Health','M3 17l5-6 4 3 5-8M17 6v3M17 6h-3',6],
- ['leads','Lead Scoring','M10 2l2.4 5 5.6.5-4.2 3.7 1.3 5.6L10 19l-5.1 2.8 1.3-5.6L2 12.5l5.6-.5z',6],
  ['assign','Lead Assignment','M7 9a3 3 0 100-6 3 3 0 000 6zM2 17a5 5 0 0110 0M15 11l2 2 3-3',6],
  ['recon','Account Reconciliation','M4 7h11M4 7l3-3M4 7l3 3M16 13H5M16 13l-3-3M16 13l-3 3',6],
  ['pending','Pending Migration','M4 10h12M12 6l4 4-4 4',4],
@@ -967,7 +965,7 @@ function buildNav(){
 document.getElementById('nav').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
   if(b.classList.contains('locked')){go('data');return;} go(b.dataset.p);});
 function go(p,client){
-  if(!hasData&&p!=='data'&&p!=='pkg'&&p!=='diag'&&p!=='match'&&p!=='ownermap')p='data';
+  if(!hasData&&p!=='data'&&p!=='pkg'&&p!=='diag'&&p!=='match'&&p!=='ownermap'&&p!=='action')p='data';
   state.page=p; if(client!==undefined){state.c360=client;state.branch=null;}
   document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('on',b.dataset.p===p));
   document.querySelectorAll('.page').forEach(pg=>pg.classList.toggle('on',pg.id==='pg-'+p));
@@ -2679,7 +2677,41 @@ function renderOwnerMap(){
       <div class="twrap" style="max-height:640px"><table><thead><tr><th>Owner ID · client</th><th>Manager (dropdown sets the ID) · contact-tag check</th></tr></thead><tbody>${body||'<tr><td colspan=2 class="hint">No active clients resolved to a Nimble owner ID yet.</td></tr>'}</tbody></table></div></div>`;
 }
 
-const RENDER={ownermap:renderOwnerMap,match:renderMatch,diag:renderDiag,exec:renderExec,radar:renderRadar,fin:renderFin,kpi:renderKpi,c360:renderC360,price:renderPrice,gap:renderGap,m365:renderM365,posture:renderPosture,cyber:renderCyber,nis2:renderNis2,win10:renderWin10,pkg:renderPkg,am:renderAm,health:renderHealth,churn:renderChurn,crm:renderCrm,pipeline:renderPipeline,leads:renderLeads,assign:renderAssign,recon:renderRecon,pending:renderPending,data:renderData};
+function renderAction(){
+  const el=document.getElementById('pg-action');
+  if(!hasData){ el.innerHTML='<h1 class="ph">Action <em>Centre</em></h1><div class="note">Load NetSuite, and Nimble for ownership, from the Data Hub. This page then shows exactly what needs your attention.</div>'; return; }
+  try{ if(crmFeed()) mergeCRM(); }catch(e){}
+  const unassigned=[]; for(let i=0;i<NC0;i++){ const m=META[i]; if(!isClient(m))continue; const o=ownerOf(m.n); if(!o||o==='Unassigned') unassigned.push(m); }
+  unassigned.sort((a,b)=>totMRR(b)-totMRR(a));
+  const review=(CRM&&CRM.review)?CRM.review.length:0;
+  let dvb=[];
+  try{ dvb=filteredMeta().filter(m=>m.dev>0&&supportType(m)).map(m=>{const v=supportMRR(m),t=supportType(m),b=supportTarget(m);return {m,t,v,b,gap:(b*m.dev)-v,pd:m.dev?v/m.dev:0};}).filter(r=>r.gap>=25).sort((a,b)=>b.gap-a.gap); }catch(e){}
+  const dvbTotal=dvb.reduce((a,r)=>a+r.gap,0);
+  const devLoaded=!!window.DEVICE_COUNTS;
+  let uncl=0; try{ uncl=filteredMeta().filter(m=>Object.keys(m.mrr||{}).some(k=>/other|unmapped/i.test(k))).length; }catch(e){}
+  el.innerHTML=`<h1 class="ph">Action <em>Centre</em></h1>
+  <p class="psub">Your home base: what needs attention and where to fix it. Clear these and the dashboard is clean, owned and current.</p>
+  <div class="grid cards">
+    <div class="card ${unassigned.length?'hl':''}"><div class="k">Clients without an owner</div><div class="v ${unassigned.length?'neg':''}">${unassigned.length}</div><div class="s">assign on Owner Mapping</div></div>
+    <div class="card ${review?'hl':''}"><div class="k">Names to confirm</div><div class="v ${review?'warn':''}">${review}</div><div class="s">Client Matching</div></div>
+    <div class="card ${dvb.length?'hl':''}"><div class="k">Under-billed vs devices</div><div class="v ${dvb.length?'neg':''}">${devLoaded?fmtE(dvbTotal):'—'}</div><div class="s">${devLoaded?dvb.length+' clients, monthly upside':'load Site device count'}</div></div>
+    <div class="card"><div class="k">Unclassified revenue</div><div class="v ${uncl?'warn':''}">${uncl}</div><div class="s">refresh mapping if high</div></div>
+  </div>
+  <div class="two">
+    <div class="panel"><h3>Clients to assign an owner</h3><div class="hint">Highest revenue first. Fix in bulk on Owner Mapping (by Nimble owner ID) or one at a time on Reconciliation. Saved centrally for everyone.</div>
+    <div class="twrap" style="max-height:360px"><table><thead><tr><th>Client</th><th class="num">MRR</th></tr></thead><tbody>
+    ${unassigned.slice(0,30).map(m=>`<tr><td class="clink" onclick="goClient('${jsq(m.n)}')">${esc(m.n)}</td><td class="num">${fmtE(totMRR(m))}</td></tr>`).join('')||'<tr><td colspan=2 class="hint">Everyone has an owner. Nicely done.</td></tr>'}
+    </tbody></table></div>
+    <div style="margin-top:10px;display:flex;gap:8px"><button class="btn" onclick="go('ownermap')">Owner Mapping</button><button class="btn" style="background:#2a3550" onclick="go('recon')">Reconciliation</button></div></div>
+    <div class="panel"><h3>Billing below devices held</h3><div class="hint">Clients whose managed-IT billing is materially under the devices Autotask reports, so likely revenue on the table. Needs the Site device count loaded on the Data Hub.</div>
+    <div class="twrap" style="max-height:360px"><table><thead><tr><th>Client</th><th class="num">Devices</th><th class="num">€/dev</th><th class="num">Gap/mo</th></tr></thead><tbody>
+    ${devLoaded?(dvb.slice(0,30).map(r=>`<tr><td class="clink" onclick="goClient('${jsq(r.m.n)}')">${esc(r.m.n)}</td><td class="num">${r.m.dev}</td><td class="num">€${r.pd.toFixed(0)}</td><td class="num neg">+${fmtE(r.gap)}</td></tr>`).join('')||'<tr><td colspan=4 class="hint">No material gaps found.</td></tr>'):'<tr><td colspan=4 class="hint">Load the Site device count CSV to see this.</td></tr>'}
+    </tbody></table></div>
+    <div style="margin-top:10px"><button class="btn" onclick="go('match')">Client Matching</button></div></div>
+  </div>`;
+}
+
+const RENDER={action:renderAction,ownermap:renderOwnerMap,match:renderMatch,diag:renderDiag,exec:renderExec,radar:renderRadar,fin:renderFin,kpi:renderKpi,c360:renderC360,price:renderPrice,gap:renderGap,m365:renderM365,posture:renderPosture,cyber:renderCyber,nis2:renderNis2,win10:renderWin10,pkg:renderPkg,am:renderAm,health:renderHealth,churn:renderChurn,crm:renderCrm,pipeline:renderPipeline,leads:renderLeads,assign:renderAssign,recon:renderRecon,pending:renderPending,data:renderData};
 
 /* ================= CRM (Nimble) merge layer ================= */
 const AM_ROSTER={DF:'David Flood',DG:'David Groark',DMcD:'David McDonald',DOC:"Derek O'Callaghan",EB:'Emil Badea',EJ:'Eoghan Johnson',SC:'Simon Collins',MD:'Michael Daly',EG:'Eamon Gallagher'};
@@ -3193,14 +3225,14 @@ function renderRecon(){
   const _rs=document.getElementById('reconSearch'); if(_rs&&reconFilter){ _rs.value=reconFilter; } filterReconRows(reconFilter);
 }
 
-function refresh(){if(!hasData&&state.page!=='pkg'&&state.page!=='diag'&&state.page!=='match'&&state.page!=='ownermap'&&!(['crm','recon','pipeline','leads','assign'].includes(state.page)&&hasCrm())){renderData();return;}RENDER[state.page]();}
+function refresh(){if(!hasData&&state.page!=='pkg'&&state.page!=='diag'&&state.page!=='match'&&state.page!=='ownermap'&&state.page!=='action'&&!(['crm','recon','pipeline','leads','assign'].includes(state.page)&&hasCrm())){renderData();return;}RENDER[state.page]();}
 bindData();buildNav();
 loadCentralOverrides().then(loaded=>{ if(loaded){ if(hasData){ bindData(); buildNav(); rebuildOwnerFilter(); } if(state.page)refresh(); } });
 if(hasData){
-  buildFbar();applyPreset('ttm');syncMonthInputs();go('exec');
+  buildFbar();applyPreset('ttm');syncMonthInputs();go('action');
 }else{
   go(hasCrm()?'crm':'data');
-  buildDataset({source:'feed',silent:true}).then(ok=>{ if(ok) go('exec'); });
+  buildDataset({source:'feed',silent:true}).then(ok=>{ if(ok) go('action'); });
 }
 Promise.all(getSources().filter(s=>s.role!=='primary').map(s=>
   fetch(s.url,{credentials:'include',cache:'no-store'}).then(r=>r.ok?r.json():null).then(json=>{
