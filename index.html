@@ -1657,22 +1657,28 @@ async function loadFromFeed(url,say){
   say('Requesting the latest data feed…');
   const isNetSuite=/netsuite/i.test(url);
   if(isNetSuite){
-    // pull year-by-year so no single window hits NetSuite's offset cap, then classify
+    // Month-by-month keeps every query tiny (no offset cap) and lets us fetch in
+    // small parallel batches, so it is fast and does not freeze the tab, and it
+    // always reaches the current month.
     const base=url.split('?')[0];
-    let all=[]; const nowY=new Date().getFullYear();
-    for(let y=2024; y<=nowY; y++){
-      const from=y+'-01-01', to=(y+1)+'-01-01';
-      let page=0,hasMore=true,guard=0;
-      while(hasMore && guard<150){
-        say('Pulling NetSuite invoices '+y+' ('+all.length.toLocaleString()+' lines so far)…');
-        const res=await fetch(base+'?from='+from+'&to='+to+'&page='+page,{credentials:'include',cache:'no-store'});
-        if(!res.ok){ const t=await res.text().catch(()=> ''); throw new Error('NetSuite feed failed ('+res.status+'). '+t.slice(0,160)); }
-        const j=await res.json();
-        if(j&&j.rows){ all=all.concat(j.rows); hasMore=!!j.hasMore; } else { throw new Error('Unexpected NetSuite feed response.'); }
-        page++; guard++;
-      }
+    const pad=n=>String(n).padStart(2,'0');
+    const now=new Date(); const endY=now.getFullYear(), endM=now.getMonth(); // 0-based current month
+    const months=[];
+    for(let y=2024;y<=endY;y++){ const mEnd=(y===endY)?endM:11; for(let mo=0;mo<=mEnd;mo++){
+      const from=y+'-'+pad(mo+1)+'-01'; const nY=(mo===11)?y+1:y, nM=(mo===11)?1:mo+2; months.push({from,to:nY+'-'+pad(nM)+'-01'}); } }
+    async function pullMonth(mo){ let out=[],page=0,more=true,g=0;
+      while(more && g<20){ const res=await fetch(base+'?from='+mo.from+'&to='+mo.to+'&page='+page,{credentials:'include',cache:'no-store'});
+        if(!res.ok){ const t=await res.text().catch(()=> ''); throw new Error('NetSuite feed failed ('+res.status+'). '+t.slice(0,140)); }
+        const j=await res.json(); if(j&&j.rows){ out=out.concat(j.rows); more=!!j.hasMore; } else more=false; page++; g++; }
+      return out; }
+    const all=[]; const CONC=4;
+    for(let i=0;i<months.length;i+=CONC){
+      say('Pulling NetSuite invoices… '+all.length.toLocaleString()+' lines so far');
+      const res=await Promise.all(months.slice(i,i+CONC).map(pullMonth));
+      for(const r of res) for(const x of r) all.push(x);
     }
     DIAG_NS={rows:all, pulledAt:new Date().toISOString()};
+    say('Classifying '+all.length.toLocaleString()+' invoice lines…');
     return mapSheets(netsuiteToSheets({source:'netsuite',rows:all},say),say);
   }
   const res=await fetch(url,{credentials:'include',cache:'no-store'});
