@@ -818,7 +818,9 @@ function applyRenames(){
   }
 }
 
-function ownerOf(n){if(OWNER_OVR[n])return OWNER_OVR[n];const m=metaByC[n];return (m&&(m.ownerFinal||m.owner))||'Unassigned';}
+const GROUP_OWNER={'EMEIS':"Derek O'Callaghan",'Bright Motor Group':'Eoghan Johnson','BMG':'Eoghan Johnson','EWL':'Emil Badea','Eastern Electrical':'Emil Badea'};
+function groupOwner(n){ if(!n)return ''; if(GROUP_OWNER[n])return GROUP_OWNER[n]; const g=(typeof groupOf==='function')?groupOf(n):null; return (g&&GROUP_OWNER[g])||''; }
+function ownerOf(n){ if(OWNER_OVR[n])return OWNER_OVR[n]; const g=groupOwner(n); if(g)return g; const m=metaByC[n]; return (m&&(m.ownerFinal||m.owner))||'Unassigned'; }
 function filteredClients(){let x=[...Array(NC).keys()];if(state.owner)x=x.filter(i=>ownerOf(C[i])===state.owner);if(state.sel&&state.sel.size)x=x.filter(i=>state.sel.has(i));return x;}
 function idxSetOrNull(){const f=filteredClients();return f.length===NC?null:new Set(f);}
 function filteredMeta(){return filteredClients().map(i=>metaByC[C[i]]).filter(Boolean);}
@@ -930,7 +932,6 @@ function radarCard(x){
 <script>
 /* ============ nav & filter bar ============ */
 const PAGES=[
- ['action','Action Centre','M10 2a6 6 0 00-6 6c0 4-2 5-2 5h16s-2-1-2-5a6 6 0 00-6-6zM8 17a2 2 0 004 0',1],
  ['exec','Exec Overview','M3 13l4-4 4 3 6-7',0],
  ['radar','Opportunity Radar','M10 2a8 8 0 108 8',0],
  ['fin','Financial Analysis','M4 16V8m6 8V4m6 12v-6',1],
@@ -941,7 +942,7 @@ const PAGES=[
  ['health','Client Health','M3 10h3l2-5 3 10 2-5h4',0],
  ['c360','Client 360','M10 10a4 4 0 100-8 4 4 0 000 8zm-7 8a7 7 0 0114 0',2],
  ['price','Pricing Health','M10 2v16M6 6h6a3 3 0 010 6H7a3 3 0 000 6h7',0],
- ['gap','Whitespace Map','M3 3h6v6H3zM11 3h6v6h-6zM3 11h6v6H3zM11 11h6v6h-6z',0],
+ ['gap','Gap Analysis','M3 3h6v6H3zM11 3h6v6h-6zM3 11h6v6H3zM11 11h6v6h-6z',0],
  ['m365','Microsoft 365','M3 3h6.5v6.5H3zM10.5 3H17v6.5h-6.5zM3 10.5h6.5V17H3zM10.5 10.5H17V17h-6.5z',0],
  ['posture','Cyber Posture','M10 2l7 3v5c0 5-3.5 7.5-7 8-3.5-.5-7-3-7-8V5zM7 10l2 2 4-4',3],
  ['cyber','CyberProtect Radar','M10 2l7 3v5c0 5-3.5 7.5-7 8-3.5-.5-7-3-7-8V5z',0,'sub'],
@@ -950,16 +951,17 @@ const PAGES=[
  ['assign','Lead Assignment','M7 9a3 3 0 100-6 3 3 0 000 6zM2 17a5 5 0 0110 0M15 11l2 2 3-3',6],
  ['pending','Pending Migration','M4 10h12M12 6l4 4-4 4',4],
  ['data','Data Hub','M10 3c3.9 0 7 1 7 2.5S13.9 8 10 8 3 7 3 5.5 6.1 3 10 3zM3 5.5v9c0 1.5 3.1 2.5 7 2.5s7-1 7-2.5v-9',4],
+ ['action','Action Centre','M10 2a6 6 0 00-6 6c0 4-2 5-2 5h16s-2-1-2-5a6 6 0 00-6-6zM8 17a2 2 0 004 0',7],
  ['match','Client Matching','M4 7h8M4 11h5M14 4l3 3-3 3M4 15h12',4],
  ['ownermap','Owner Mapping','M4 5h12M4 10h12M4 15h12M2 5h.01M2 10h.01M2 15h.01',4],
  ['multisite','Multi-Site Clients','M3 5h6v6H3zM11 5h6v4h-6zM11 11h6v4h-6zM3 13h6v2H3z',4],
 ];
-const SECT={0:'',1:'Analysis',5:'Sales tools',2:'Drill-down',3:'Cyber posture',6:'CRM',4:'Coming across'};
+const SECT={0:'',1:'Analysis',5:'Sales tools',2:'Drill-down',3:'Cyber posture',6:'CRM',4:'Coming across',7:'Action'};
 function buildNav(){
   document.getElementById('nav').innerHTML=PAGES.map(p=>{const[id,label,path,sect,sub]=p;
     const locked=(!hasData&&id!=='data'&&id!=='pkg'&&id!=='diag'&&id!=='match'&&id!=='ownermap'&&id!=='multisite'&&!((id==='crm'||id==='recon'||id==='pipeline'||id==='leads'||id==='assign')&&hasCrm()))||(id==='win10'&&hasData&&!hasAttrs)||(id==='pending'&&hasData&&!((DATA.pending||[]).length))||((id==='recon'||id==='crm'||id==='pipeline'||id==='leads'||id==='assign')&&!hasCrm());
     return (SECT[sect]?`<div class="sep">${SECT[sect]}</div>`:'')+
-    `<button data-p="${id}" class="${sub?'sub':''} ${locked?'locked':''}"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="${path}"/></svg><span>${label}</span></button>`;}).join('');
+    `<button data-p="${id}" class="${sub?'sub':''} ${locked?'locked':''}"${id==='action'?' style="color:#ff9f43;font-weight:700"':''}><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="${path}"/></svg><span>${label}</span></button>`;}).join('');
 }
 document.getElementById('nav').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
   if(b.classList.contains('locked')){go('data');return;} go(b.dataset.p);});
@@ -1342,14 +1344,18 @@ function renderGap(){
   const lines=m=>WS.filter(s=>(m.mrr[s]||0)>0).length;
   const avg=metas.reduce((a,m)=>a+lines(m),0)/Math.max(1,metas.length);
   document.getElementById('pg-gap').innerHTML=`
-  <h1 class="ph">Whitespace <em>Map</em></h1>
-  <p class="psub">Everything each client buys, side by side. Empty cells are cross-sell whitespace and deeper blue means larger MRR. A yellow dot means the capability is held inside a bundle even though there is no separate line for it.</p>
+  <h1 class="ph">Gap <em>Analysis</em></h1>
+  <p class="psub">Everything each client buys, side by side, so the gaps are obvious. Empty cells are cross-sell gaps, deeper blue is larger MRR, and a yellow dot means the capability is held inside a bundle even though there is no separate line for it. The table below the chart ranks where the biggest gaps across the base are.</p>
   <div class="grid cards">
     <div class="card"><div class="k">Average lines per client</div><div class="v">${avg.toFixed(1)}</div><div class="s">of ${WS.length} core lines</div></div>
     <div class="card"><div class="k">Single-line clients</div><div class="v">${metas.filter(m=>lines(m)<=1).length}</div><div class="s">churn risk</div></div>
     <div class="card"><div class="k">Four or more lines</div><div class="v">${metas.filter(m=>lines(m)>=4).length}</div><div class="s">embedded relationships</div></div>
   </div>
   <div class="panel"><h3>Penetration by line</h3><div class="chartbox"><canvas id="chGap"></canvas></div></div>
+  <div class="panel"><h3>Where the gaps are</h3><div class="hint">Each core line, how many clients already hold it, and how many do not. The bottom of this list is your largest cross-sell room across the base.</div>
+  <div class="twrap" style="max-height:360px"><table><thead><tr><th>Service line</th><th class="num">Clients with it</th><th class="num">Clients without</th><th class="num">Penetration</th></tr></thead><tbody>
+  ${pen.slice().sort((a,b)=>(metas.length-b.n)-(metas.length-a.n)).map(pp=>{const without=metas.length-pp.n;const pct=metas.length?Math.round(100*pp.n/metas.length):0;return `<tr><td>${esc(SVC_LABEL[pp.s]||pp.s)}</td><td class="num">${pp.n}</td><td class="num ${without>metas.length*0.6?'neg':''}">${without}</td><td class="num">${pct}%</td></tr>`;}).join('')}
+  </tbody></table></div></div>
   <div class="panel"><h3>Client against service matrix</h3><div class="hint">Top ${Math.min(80,metas.length)} by MRR, each cell showing monthly recurring on that line</div>
   <div class="twrap"><table><thead><tr><th>Client</th><th class="num">MRR</th>${WS.map(s=>`<th title="${SVC_LABEL[s]||s}">${(SVC_LABEL[s]||s).replace('CyberProtect ','CP ').slice(0,10)}</th>`).join('')}</tr></thead><tbody>
   ${metas.slice(0,80).map(m=>`<tr><td class="clink" onclick="goClient('${jsq(m.n)}')">${esc(m.n)}</td><td class="num">${fmtE(totMRR(m))}</td>${
@@ -1724,7 +1730,7 @@ function renderData(){
   const um=(DATA&&DATA.rmmUnmatched)||[];
   document.getElementById('pg-data').innerHTML=`
   <h1 class="ph">Data <em>Hub</em></h1>
-  <p class="psub">This dashboard ships empty. Drop your workbook below and everything is processed inside your browser, so no file is uploaded anywhere and nothing leaves this machine. Nothing is stored unless you ask for it, so by default the file opens blank every time it is shared or reopened.</p>
+  <p class="psub">This dashboard reads live data from NetSuite and Nimble through your Azure tenant. Press Load now on a source to pull it, all processed inside your browser so nothing leaves this machine. A workbook is optional, the mapping is built in, so you only upload one to refresh names and services. The Site device count CSV is a manual upload. Nothing is kept unless you tick remember, so by default it opens blank when shared or reopened.</p>
   ${hasData?`<div class="note"><b>Dataset loaded.</b> ${NC} master companies across ${BRANCH.length||0} branch records, ${NM} months to ${DATA.maxDate}, last complete month ${DATA.lastFull}. <a href="#" onclick="resetData();return false">Clear it</a>.</div>`:''}
   <div class="panel"><h3>Connected data sources</h3>
   <div class="hint">Each source syncs independently. The source marked <b>primary</b> feeds this dashboard's revenue and client model — that's NetSuite. Any other source (a CRM, a helpdesk, anything else) is fetched and held ready for future pages to use, without touching the existing figures. Add as many as you need.</div>
@@ -2626,19 +2632,19 @@ function filterMatchRows(q){ matchFilter=q||''; q=(q||'').toLowerCase(); const r
     const okQ=!q||n.indexOf(q)>=0; const okR=!ro||st==='red'||un; tr.style.display=(okQ&&okR)?'':'none'; }); }
 function saveMatchNotes(){ const t=document.getElementById('matchNotes'); if(!t)return; window.__matchNotes=t.value; pushOverride({clientRenames:{'__matchNotes__':t.value||null}}); matchNotesDirty=false; }
 
-let CONTACT_TAGS=null;
+let CONTACT_TAGS=null, CONTACT_TAG_TALLY=null;
 async function loadContactTags(){
   const btn=document.getElementById('ctBtn'); if(btn){btn.disabled=true;btn.textContent='Reading contact tags…';}
   try{
-    let map={},page=0,hasMore=true,guard=0;
+    let map={},tally={},page=0,hasMore=true,guard=0;
     while(hasMore&&guard<400){
       const res=await fetch('/api/getSource/nimbletags?page='+page,{credentials:'include',cache:'no-store'});
       if(!res.ok){ const t=await res.text().catch(()=> ''); throw new Error(res.status+' '+t.slice(0,120)); }
       const j=await res.json();
-      (j.rows||[]).forEach(r=>{ const k=(r.company||'').toLowerCase().trim(); if(!k)return; const set=new Set(map[k]||[]); (r.codes||[]).forEach(c=>set.add(c)); map[k]=[...set]; });
+      (j.rows||[]).forEach(r=>{ const k=(r.company||'').toLowerCase().trim(); if(k){ const set=new Set(map[k]||[]); (r.codes||[]).forEach(c=>set.add(c)); map[k]=[...set]; } (r.raw||[]).forEach(pr=>{ const t=pr.t||pr; const code=pr.code||''; tally[t]=tally[t]||{code:code,count:0}; tally[t].count++; }); });
       hasMore=!!j.hasMore; page++; guard++; if(btn)btn.textContent='Reading contact tags… page '+page;
     }
-    CONTACT_TAGS=map; renderOwnerMap();
+    CONTACT_TAGS=map; CONTACT_TAG_TALLY=tally; renderOwnerMap();
   }catch(e){ if(btn){btn.disabled=false;btn.textContent='Run contact-tag cross-check';} alert('Could not read contact tags: '+e.message); }
 }
 function applyTagsAsOwners(){
@@ -2696,6 +2702,10 @@ function renderOwnerMap(){
       <div class="card"><div class="k">Active clients</div><div class="v">${totalClients}</div></div>
       ${CONTACT_TAGS?`<div class="card"><div class="k">Tag agrees</div><div class="v pos">${agree}</div></div><div class="card ${(disagree+conflict)?'hl':''}"><div class="k">Differs / conflict</div><div class="v ${(disagree+conflict)?'neg':''}">${disagree+conflict}</div><div class="s">${notag} without a contact tag</div></div>`:''}
     </div>
+    ${CONTACT_TAG_TALLY?`<div class="panel"><h3>Nimble manager tags found</h3><div class="hint">Every tag on your contacts that maps to a manager, the exact tag text as it appears in Nimble, who the dashboard maps it to, and how many contacts carry it. Check each tag points to the right person; anything wrong here is a mis-tag to fix in Nimble.</div>
+    <div class="twrap" style="max-height:300px"><table><thead><tr><th>Nimble tag</th><th>Code</th><th>Maps to manager</th><th class="num">Contacts</th></tr></thead><tbody>
+    ${Object.entries(CONTACT_TAG_TALLY).sort((a,b)=>b[1].count-a[1].count).map(([t,v])=>{const mgr=AM_ROSTER[v.code]||''; return `<tr><td>${esc(t)}</td><td style="font-family:monospace">${esc(v.code||'?')}</td><td>${mgr?esc(mgr):'<span class="neg">unmapped code</span>'}</td><td class="num">${v.count}</td></tr>`;}).join('')}
+    </tbody></table></div></div>`:''}
     <div class="panel"><div style="display:flex;gap:10px;align-items:center;margin-bottom:10px"><h3 style="margin:0;flex:1">Clients by owner ID</h3>
       <button class="btn" id="ctBtn" onclick="loadContactTags()">${CONTACT_TAGS?'Re-run contact-tag cross-check':'Run contact-tag cross-check'}</button>${CONTACT_TAGS?'<button class="btn" style="background:var(--yellow);color:#101e3b" onclick="applyTagsAsOwners()">Assign all from tags</button>':''}</div>
       <div class="twrap" style="max-height:640px"><table><thead><tr><th>Owner ID · client</th><th>Manager (dropdown sets the ID) · contact-tag check</th></tr></thead><tbody>${body||'<tr><td colspan=2 class="hint">No active clients resolved to a Nimble owner ID yet.</td></tr>'}</tbody></table></div></div>`;
@@ -2746,20 +2756,27 @@ function rebuildFromCache(){
 }
 function groupOf(name){ const parts=String(name||'').split(/\s*-\s*/); return parts.length>1?parts[0].trim():null; }
 function multiSiteGroups(){
-  const B=mapBundle(); const dev=window.DEVICE_COUNTS||{}; const groups={};
+  const B=mapBundle(); const dev=window.DEVICE_COUNTS||{}; const groups={}, byMapped={};
   (B.clients||[]).forEach(c=>{ const ns=(c[0]||'').trim(),at=(c[1]||'').trim(),nb=(c[2]||'').trim(),mp=(c[3]||ns||at||nb).trim(); if(!mp)return;
-    const g=groupOf(mp); if(!g)return; (groups[g]=groups[g]||[]).push({mapped:mp,ns,at,nb}); });
-  Object.keys(groups).forEach(g=>{ if(groups[g].length<2) delete groups[g]; });
-  return Object.keys(groups).sort().map(g=>{
-    const sites=groups[g].map(s=>{ const meta=(typeof metaByC!=='undefined'&&(metaByC[s.mapped]||metaByC[s.ns]))||null;
-      const mrr=meta?totMRR(meta):0; const devices=(dev[s.at]!=null?dev[s.at]:(dev[s.mapped]!=null?dev[s.mapped]:0))||0;
-      const owner=meta?ownerOf(meta.n):''; let site=s.mapped;
-      if(site.toLowerCase().indexOf(g.toLowerCase())===0){ site=site.slice(g.length).replace(/^\s*-\s*/,'').trim()||g; }
+    const g=groupOf(mp);
+    if(g){ (groups[g]=groups[g]||{same:false,rows:[]}).rows.push({mapped:mp,ns,at,nb}); }
+    else { (byMapped[mp]=byMapped[mp]||[]).push({mapped:mp,ns,at,nb}); } });
+  Object.keys(byMapped).forEach(mp=>{ if(byMapped[mp].length>1) groups[mp]={same:true,rows:byMapped[mp]}; });
+  Object.keys(groups).forEach(g=>{ if(groups[g].rows.length<2) delete groups[g]; });
+  return Object.keys(groups).map(g=>{ const G=groups[g], same=G.same;
+    const sites=G.rows.map(s=>{ const devices=(dev[s.at]!=null?dev[s.at]:(dev[s.mapped]!=null?dev[s.mapped]:0))||0;
+      let site,mrr=0,owner='';
+      if(same){ site=s.at||s.ns||s.mapped; }
+      else { const meta=(metaByC[s.mapped]||metaByC[s.ns])||null; mrr=meta?totMRR(meta):0; owner=meta?ownerOf(meta.n):'';
+        site=s.mapped; if(site.toLowerCase().indexOf(g.toLowerCase())===0){ site=site.slice(g.length).replace(/^\s*-\s*/,'').trim()||g; } }
       return {full:s.mapped, site, mrr, devices, owner, billing:mrr>0}; })
       .sort((a,b)=>b.mrr-a.mrr||b.devices-a.devices);
-    const mrr=sites.reduce((a,s)=>a+s.mrr,0), devices=sites.reduce((a,s)=>a+s.devices,0);
+    let mrr=sites.reduce((a,s)=>a+s.mrr,0);
+    if(same){ const meta=metaByC[g]||null; mrr=meta?totMRR(meta):0; }
+    const devices=sites.reduce((a,s)=>a+s.devices,0);
     const billing=sites.filter(s=>s.billing).length, deviceOnly=sites.filter(s=>!s.billing&&s.devices>0).length;
-    const owners=[...new Set(sites.map(s=>s.owner).filter(Boolean))];
+    let owners = same ? [ (metaByC[g]?ownerOf(g):groupOwner(g)) ].filter(Boolean) : [...new Set(sites.map(s=>s.owner).filter(Boolean))];
+    if(!owners.length && groupOwner(g)) owners=[groupOwner(g)];
     return {g,sites,mrr,devices,billing,deviceOnly,owners};
   }).sort((a,b)=>b.devices-a.devices||b.mrr-a.mrr);
 }
@@ -3004,7 +3021,9 @@ function amFromOwner(ownerName){
 function renderCrm(){
   if(!hasCrm()){ document.getElementById('pg-crm').innerHTML='<div class="lockmsg"><div class="big">🔗</div><h2>No CRM feed loaded</h2><p>Connect Nimble on the Data Hub. Once the feed is in, this section analyses your CRM on its own, with or without NetSuite.</p><button class="btn" style="margin-top:16px" onclick="go(\'data\')">Open the Data Hub</button></div>'; return; }
   crmAnalyse(); const A=CRMA;
-  const mgrRows=Object.entries(A.byManager).sort((a,b)=>b[1]-a[1]);
+  let realByMgr=null;
+  if(typeof hasData!=='undefined'&&hasData){ realByMgr={}; for(let i=0;i<NC0;i++){ const m=META[i]; if(!isClient(m))continue; const o=ownerOf(m.n)||'Unassigned'; realByMgr[o]=(realByMgr[o]||0)+1; } }
+  const mgrRows=Object.entries(realByMgr||A.byManager).sort((a,b)=>b[1]-a[1]);
   const svcTags=Object.entries(A.tagCounts).filter(([t])=>!isAccountTag(t)).sort((a,b)=>b[1]-a[1]);
   const when=A.loadedAt?new Date(A.loadedAt).toLocaleString('en-IE',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'';
   document.getElementById('pg-crm').innerHTML=`

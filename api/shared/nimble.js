@@ -16,6 +16,7 @@ module.exports = { getCrmData };
 function companyNameOf(c){ const f=c.fields||{}; const pick=k=>Array.isArray(f[k])&&f[k][0]?(f[k][0].value||f[k][0]):null; return pick('company name')||pick('company')||''; }
 const AM_CODES=['DMcD','DOC','DF','DG','SC','MD','EB','EJ','EG'];
 function tagCodes(tags){ const out=[]; (tags||[]).forEach(t=>{ if(!/accounts?/i.test(t))return; for(const code of AM_CODES){ const re=new RegExp('(^|[^a-z])'+code.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'([^a-z]|$)','i'); if(re.test(t)){ if(out.indexOf(code)<0)out.push(code); break; } } }); return out; }
+function tagPairs(tags){ const out=[]; (tags||[]).forEach(t=>{ if(!/accounts?/i.test(t))return; for(const code of AM_CODES){ const re=new RegExp('(^|[^a-z])'+code.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'([^a-z]|$)','i'); if(re.test(t)){ out.push({t:t,code:code}); break; } } }); return out; }
 // One page of contacts (persons) -> [{company, codes}] with hasMore, for client-side paging.
 async function getContactTags(token, opts){
   opts=opts||{}; const page=(opts.page!=null?opts.page:0)+1; const perPage=100;
@@ -25,7 +26,7 @@ async function getContactTags(token, opts){
   const data=await res.json();
   const list=data.resources||data.contacts||[];
   const rows=[];
-  for(const c of list){ const codes=tagCodes(tagsOf(c)); if(!codes.length)continue; const company=companyNameOf(c); if(!company)continue; rows.push({company, codes}); }
+  for(const c of list){ const tg=tagsOf(c); const pairs=tagPairs(tg); if(!pairs.length)continue; const company=companyNameOf(c); if(!company)continue; rows.push({company, codes:pairs.map(p=>p.code), raw:pairs}); }
   const pages=(data.meta&&(data.meta.pages||data.meta.total_pages))||page;
   return { source:'nimbletags', page:opts.page||0, rows, hasMore: page<pages };
 }
