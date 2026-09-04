@@ -841,7 +841,7 @@ const SVC_LABEL={MIT:'Managed IT',RMIT:'Remote Managed IT',M365:'Microsoft 365',
 
 function totMRR(m){return Object.values(m.mrr).reduce((a,b)=>a+b,0);}
 function isActive(m){return totMRR(m)>50;}
-function isClient(m){ return !!(m && m.n); }  /* every NetSuite/CRM client counts for assignment, active or not */
+function isClient(m){ return !!(m && m.n) && (totMRR(m)>0 || (m.ttmR||0)>0 || (m.ttmN||0)>0); }  /* clients with actual revenue only; €0 clients are dropped */
 function isManaged(m){return (m.mrr.MIT||0)>0||(m.mrr.RMIT||0)>0;}
 function has(m,c){return (m.caps||[]).includes(c);}
 function hasM365(m){return (m.mrr.M365||0)>0&&m.seats>0;}
@@ -948,10 +948,8 @@ const PAGES=[
  ['nis2','NIS2 Compliance','M6 2h8l2 3v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5z M8 9h4M8 12h4',0,'sub'],
  ['crm','CRM Overview','M10 3a4 4 0 100 8 4 4 0 000-8zM3 17a7 7 0 0114 0',6],
  ['assign','Lead Assignment','M7 9a3 3 0 100-6 3 3 0 000 6zM2 17a5 5 0 0110 0M15 11l2 2 3-3',6],
- ['recon','Account Reconciliation','M4 7h11M4 7l3-3M4 7l3 3M16 13H5M16 13l-3-3M16 13l-3 3',6],
  ['pending','Pending Migration','M4 10h12M12 6l4 4-4 4',4],
  ['data','Data Hub','M10 3c3.9 0 7 1 7 2.5S13.9 8 10 8 3 7 3 5.5 6.1 3 10 3zM3 5.5v9c0 1.5 3.1 2.5 7 2.5s7-1 7-2.5v-9',4],
- ['diag','Feed Diagnostics','M8 4a4 4 0 104 4M13 13l4 4M3 3l14 14',4],
  ['match','Client Matching','M4 7h8M4 11h5M14 4l3 3-3 3M4 15h12',4],
  ['ownermap','Owner Mapping','M4 5h12M4 10h12M4 15h12M2 5h.01M2 10h.01M2 15h.01',4],
 ];
@@ -1662,7 +1660,7 @@ async function loadFromFeed(url,say){
     // pull year-by-year so no single window hits NetSuite's offset cap, then classify
     const base=url.split('?')[0];
     let all=[]; const nowY=new Date().getFullYear();
-    for(let y=2023; y<=nowY; y++){
+    for(let y=2024; y<=nowY; y++){
       const from=y+'-01-01', to=(y+1)+'-01-01';
       let page=0,hasMore=true,guard=0;
       while(hasMore && guard<150){
@@ -2634,6 +2632,23 @@ async function loadContactTags(){
     CONTACT_TAGS=map; renderOwnerMap();
   }catch(e){ if(btn){btn.disabled=false;btn.textContent='Run contact-tag cross-check';} alert('Could not read contact tags: '+e.message); }
 }
+function applyTagsAsOwners(){
+  if(!CONTACT_TAGS){ alert('Run the contact-tag cross-check first.'); return; }
+  const feed=crmFeed(); if(!feed) return;
+  const accs=feed.accounts||[]; const idx=PIPE.buildIndex(C.slice(0,NC0));
+  const patch={}; let n=0, conflicts=0;
+  accs.forEach(a=>{ const codes=CONTACT_TAGS[(a.name||'').toLowerCase().trim()]; if(!codes||!codes.length) return; if(codes.length>1){ conflicts++; return; }
+    const mgr=AM_ROSTER[codes[0]]||''; if(!mgr) return;
+    let cn=(cI[a.name]!==undefined)?a.name:(CRM_XWALK[a.name]||null); if(!cn){ const mm=PIPE.matchSite(a.name,idx); if(mm.name&&mm.score>=0.85)cn=mm.name; }
+    if(!cn) return; const m=metaByC[cn]; if(!m||!isClient(m)) return;
+    if(ownerOf(cn)!==mgr){ patch[cn]=mgr; OWNER_OVR[cn]=mgr; n++; }
+  });
+  if(!n){ alert('All tagged clients already carry the right owner'+(conflicts?' ('+conflicts+' have conflicting tags, left for you to decide).':'.')); renderOwnerMap(); return; }
+  try{localStorage.setItem('itie3_owner',JSON.stringify(OWNER_OVR));}catch(e){}
+  pushOverride({ownerOverrides:patch}).then(()=>{ bindData(); renderOwnerMap(); });
+  bindData(); renderOwnerMap();
+  alert('Assigned '+n+' clients from their Nimble tags'+(conflicts?'; '+conflicts+' with conflicting tags were left for you to decide.':'.'));
+}
 function setOwnerIdMap(id,mgr){ if(mgr) OWNER_ID_MAP_OVR[id]=mgr; else delete OWNER_ID_MAP_OVR[id];
   try{localStorage.setItem('itie3_ownerid',JSON.stringify(OWNER_ID_MAP_OVR));}catch(e){}
   pushOverride({ownerIdMap:{[id]:mgr||null}}); bindData(); renderOwnerMap(); }
@@ -2673,7 +2688,7 @@ function renderOwnerMap(){
       ${CONTACT_TAGS?`<div class="card"><div class="k">Tag agrees</div><div class="v pos">${agree}</div></div><div class="card ${(disagree+conflict)?'hl':''}"><div class="k">Differs / conflict</div><div class="v ${(disagree+conflict)?'neg':''}">${disagree+conflict}</div><div class="s">${notag} without a contact tag</div></div>`:''}
     </div>
     <div class="panel"><div style="display:flex;gap:10px;align-items:center;margin-bottom:10px"><h3 style="margin:0;flex:1">Clients by owner ID</h3>
-      <button class="btn" id="ctBtn" onclick="loadContactTags()">${CONTACT_TAGS?'Re-run contact-tag cross-check':'Run contact-tag cross-check'}</button></div>
+      <button class="btn" id="ctBtn" onclick="loadContactTags()">${CONTACT_TAGS?'Re-run contact-tag cross-check':'Run contact-tag cross-check'}</button>${CONTACT_TAGS?'<button class="btn" style="background:var(--yellow);color:#101e3b" onclick="applyTagsAsOwners()">Assign all from tags</button>':''}</div>
       <div class="twrap" style="max-height:640px"><table><thead><tr><th>Owner ID · client</th><th>Manager (dropdown sets the ID) · contact-tag check</th></tr></thead><tbody>${body||'<tr><td colspan=2 class="hint">No active clients resolved to a Nimble owner ID yet.</td></tr>'}</tbody></table></div></div>`;
 }
 
@@ -2702,7 +2717,7 @@ function renderAction(){
     <div class="twrap" style="max-height:360px"><table><thead><tr><th>Client</th><th class="num">MRR</th></tr></thead><tbody>
     ${unassigned.slice(0,30).map(m=>`<tr><td class="clink" onclick="goClient('${jsq(m.n)}')">${esc(m.n)}</td><td class="num">${fmtE(totMRR(m))}</td></tr>`).join('')||'<tr><td colspan=2 class="hint">Everyone has an owner. Nicely done.</td></tr>'}
     </tbody></table></div>
-    <div style="margin-top:10px;display:flex;gap:8px"><button class="btn" onclick="go('ownermap')">Owner Mapping</button><button class="btn" style="background:#2a3550" onclick="go('recon')">Reconciliation</button></div></div>
+    <div style="margin-top:10px;display:flex;gap:8px"><button class="btn" onclick="go('ownermap')">Owner Mapping</button></div></div>
     <div class="panel"><h3>Billing below devices held</h3><div class="hint">Clients whose managed-IT billing is materially under the devices Autotask reports, so likely revenue on the table. Needs the Site device count loaded on the Data Hub.</div>
     <div class="twrap" style="max-height:360px"><table><thead><tr><th>Client</th><th class="num">Devices</th><th class="num">€/dev</th><th class="num">Gap/mo</th></tr></thead><tbody>
     ${devLoaded?(dvb.slice(0,30).map(r=>`<tr><td class="clink" onclick="goClient('${jsq(r.m.n)}')">${esc(r.m.n)}</td><td class="num">${r.m.dev}</td><td class="num">€${r.pd.toFixed(0)}</td><td class="num neg">+${fmtE(r.gap)}</td></tr>`).join('')||'<tr><td colspan=4 class="hint">No material gaps found.</td></tr>'):'<tr><td colspan=4 class="hint">Load the Site device count CSV to see this.</td></tr>'}

@@ -31,7 +31,7 @@ async function suiteql(c,q,limit,offset){
 }
 async function getNetsuiteData(opts){
   opts=opts||{}; const c=creds();
-  const start=process.env.NETSUITE_START_DATE||'2023-01-01';
+  const start=process.env.NETSUITE_START_DATE||'2024-01-01';
   const from=opts.from||start, to=opts.to||null;
   // acc.fullname gives the full account path ("Sales Recurring : Backup : ..."),
   // which the dashboard needs both to scope revenue and to match the mapping.
