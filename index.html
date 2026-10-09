@@ -3475,7 +3475,11 @@ async function loadAutotaskSupport(){
     const r=await fetch('/api/getSource/autotask-support',{credentials:'include',cache:'no-store'});
     if(!r.ok) return;
     const j=await r.json();
-    if(j && Array.isArray(j.clients)){
+    if(j && j.clients){
+      // PowerShell ConvertTo-Json renders a single-element array as a bare object;
+      // normalise clients and each client's topIssues back to arrays.
+      if(!Array.isArray(j.clients)) j.clients=[j.clients];
+      for(const c of j.clients){ if(c&&!Array.isArray(c.topIssues)) c.topIssues=c.topIssues?[c.topIssues]:[]; }
       window.SUPPORT=j;
       if(j.loadedRatePerHour) COST_RATE=+j.loadedRatePerHour||COST_RATE;
       try{ SOURCE_DATA['autotasksupport']={data:j,loadedAt:(j.generatedAt||new Date().toISOString())}; saveSourceData(); }catch(e){}
