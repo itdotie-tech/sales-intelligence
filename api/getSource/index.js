@@ -31,6 +31,14 @@ module.exports = async function (context, req) {
       if (!data) { context.res = { status:404, body:'No Autotask sync file found yet. The office device has not written one.' }; return; }
       context.res = { headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) }; return;
     }
+    if (id === 'autotask-support') {
+      // Per-client ticket volume, worked hours and issue mix, written nightly by
+      // the same office job (automated/internal tickets already excluded).
+      const { readJsonBlob } = require('../shared/store');
+      const data = await readJsonBlob('autotask-support.json');
+      if (!data) { context.res = { status:404, body:'No Autotask support file found yet.' }; return; }
+      context.res = { headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) }; return;
+    }
     context.res = { status:404, body:`Unknown source '${id}'.` };
   } catch (e) { context.res = { status:502, body:'Source fetch failed: ' + (e.message || String(e)) }; }
 };

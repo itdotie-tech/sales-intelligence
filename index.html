@@ -942,6 +942,8 @@ const PAGES=[
  ['am','Account Managers','M7 9a3 3 0 100-6 3 3 0 000 6zm-5 8a5 5 0 0110 0M14 8a2.5 2.5 0 100-5M13 17h5v-1a4 4 0 00-3-3.9',0],
  ['health','Client Health','M3 10h3l2-5 3 10 2-5h4',0],
  ['c360','Client 360','M10 10a4 4 0 100-8 4 4 0 000 8zm-7 8a7 7 0 0114 0',2],
+ ['risk','Profitability & Risk','M10 3v14M5 7l5-4 5 4M3 11a2 2 0 004 0M13 11a2 2 0 004 0',2],
+ ['ops','Operations · Autotask','M10 7a3 3 0 100 6 3 3 0 000-6zM10 2v2M10 16v2M3 10h2M15 10h2',2],
  ['price','Pricing Health','M10 2v16M6 6h6a3 3 0 010 6H7a3 3 0 000 6h7',0],
  ['gap','Gap Analysis','M3 3h6v6H3zM11 3h6v6h-6zM3 11h6v6H3zM11 11h6v6h-6z',0],
  ['m365','Microsoft 365','M3 3h6.5v6.5H3zM10.5 3H17v6.5h-6.5zM3 10.5h6.5V17H3zM10.5 10.5H17V17h-6.5z',0],
@@ -1757,12 +1759,16 @@ function renderData(){
   </div>
   <button class="btn ghost sm" style="margin-top:10px" onclick="addSource()">+ Add data source</button>
   </div>
-  <div class="filegrid">
-    ${zone('workbook','Mapped build workbook',false,'Optional. The dashboard builds live from NetSuite. Upload a workbook only to override the live feed or refresh the bundled service mapping.','.xlsx')}
-    ${zone('attrs','Client attributes',false,'Customers, Windows 10 Devices, Cyber Resilience Cert, Secure Score, Industry. Unlocks the Windows 10 page and the Secure Score signal.','.csv or .xlsx')}
-    ${zone('devices','Site device count',false,'Device counts now come automatically from the Autotask feed'+(window.DEVICE_SOURCE&&window.DEVICE_SOURCE.type==='autotask'&&window.DEVICE_SOURCE.at?', last synced '+new Date(window.DEVICE_SOURCE.at).toLocaleDateString('en-IE'):'')+'. Joined to clients via the mapping to compare devices held against devices billed. Upload a CSV only to override the feed.'+(window.DEVICE_COUNTS?' Currently loaded: '+Object.keys(window.DEVICE_COUNTS).length+' sites.':''),'.csv')}
-    ${zone('mapping','Client & service mapping',false,'Update the built-in mapping (Client Mapping + Service Mapping sheets). Upload a newer reviewed workbook to refresh names, owners and service classification for everyone.'+(MAP_UPLOAD?' Using an uploaded mapping.':' Using the built-in mapping.'),'.xlsx')}
-  </div>
+  <details style="margin-top:16px">
+    <summary style="cursor:pointer;color:var(--mut2);font-size:13px;user-select:none">Advanced · manual file overrides (not normally needed — the connected feeds cover these)</summary>
+    <div class="hint" style="margin:10px 0">Everything below is optional. The dashboard builds entirely from the connected feeds above; use these only to override the live data with a one-off file, for example to test a revised mapping before it goes live.</div>
+    <div class="filegrid">
+      ${zone('workbook','Mapped build workbook',false,'Optional. The dashboard builds live from NetSuite. Upload a workbook only to override the live feed or refresh the bundled service mapping.','.xlsx')}
+      ${zone('attrs','Client attributes',false,'Customers, Windows 10 Devices, Cyber Resilience Cert, Secure Score, Industry. Unlocks the Windows 10 page and the Secure Score signal.','.csv or .xlsx')}
+      ${zone('devices','Site device count',false,'Device counts come automatically from the Autotask feed'+(window.DEVICE_SOURCE&&window.DEVICE_SOURCE.type==='autotask'&&window.DEVICE_SOURCE.at?', last synced '+new Date(window.DEVICE_SOURCE.at).toLocaleDateString('en-IE'):'')+'. Upload a CSV only to override the feed.'+(window.DEVICE_COUNTS?' Currently loaded: '+Object.keys(window.DEVICE_COUNTS).length+' sites.':''),'.csv')}
+      ${zone('mapping','Client & service mapping',false,'Update the built-in mapping (Client Mapping + Service Mapping sheets). Upload a newer reviewed workbook to refresh names, owners and service classification for everyone.'+(MAP_UPLOAD?' Using an uploaded mapping.':' Using the built-in mapping.'),'.xlsx')}
+    </div>
+  </details>
   <label style="display:flex;align-items:center;gap:9px;margin-top:16px;font-size:13px;color:var(--mut);cursor:pointer">
     <input type="checkbox" id="persistBox" ${PERSIST?'checked':''} onchange="setPersist(this.checked)" style="width:16px;height:16px;accent-color:var(--blue)">
     <span>Remember the data in this browser, so it is still here next time. Leave this off and the dashboard opens blank every time, which is what you want if the file is being shared or shown on someone else's machine.</span></label>
@@ -2806,7 +2812,125 @@ function renderMultiSite(){
     </tbody></table></div></div>`).join('')}`;
 }
 
-const RENDER={multisite:renderMultiSite,action:renderAction,ownermap:renderOwnerMap,match:renderMatch,diag:renderDiag,exec:renderExec,radar:renderRadar,fin:renderFin,kpi:renderKpi,c360:renderC360,price:renderPrice,gap:renderGap,m365:renderM365,posture:renderPosture,cyber:renderCyber,nis2:renderNis2,win10:renderWin10,pkg:renderPkg,am:renderAm,health:renderHealth,churn:renderChurn,crm:renderCrm,pipeline:renderPipeline,leads:renderLeads,assign:renderAssign,recon:renderRecon,pending:renderPending,data:renderData};
+/* ================= Autotask support → cost-to-serve ================= */
+let COST_RATE=70;                 // loaded engineer €/hour, adjustable on the Risk page
+let _SUPIX=null,_SUPIX_TOK=null;  // memoised support-by-client index
+function supportByClient(){
+  if(!window.SUPPORT||!Array.isArray(window.SUPPORT.clients)||!hasData) return {};
+  const tok=(window.SUPPORT.generatedAt||'')+'|'+(DATA?DATA.maxDate:'')+'|'+C.length;
+  if(_SUPIX&&_SUPIX_TOK===tok) return _SUPIX;
+  const P=PIPE,X=mapIndex(),ix=P.buildIndex(C),out={},unmatched=[];
+  for(const row of window.SUPPORT.clients){
+    const site=row.site; if(!site) continue;
+    if(/^it\.?\s*ie$/i.test(site)) continue;
+    let comp=null;
+    if(NAME_OVR[site]&&cI[NAME_OVR[site]]!==undefined) comp=NAME_OVR[site];
+    if(!comp&&cI[site]!==undefined) comp=site;
+    if(!comp){ const mp=X.atToMapped[site.toLowerCase()]; if(mp&&cI[mp]!==undefined) comp=mp; }
+    if(!comp){ const m=P.matchSite(site,ix); if(m.name&&m.score>=0.999&&!P.blocked(site,m.name)) comp=m.name; }
+    if(!comp){ unmatched.push([site,+row.workedHours||0,+row.tickets||0]); continue; }
+    const e=out[comp]=out[comp]||{hours:0,tickets:0,reopened:0,_iss:{}};
+    e.hours+=+row.workedHours||0; e.tickets+=+row.tickets||0; e.reopened+=+row.reopened||0;
+    for(const it of (row.topIssues||[])){ const k=it.type||'(untagged)'; const g=e._iss[k]=e._iss[k]||{tickets:0,hours:0}; g.tickets+=+it.tickets||0; g.hours+=+it.hours||0; }
+  }
+  for(const k of Object.keys(out)){ const e=out[k]; e.hours=Math.round(e.hours*10)/10;
+    e.topIssues=Object.entries(e._iss).map(([type,v])=>({type,tickets:v.tickets,hours:Math.round(v.hours*10)/10})).sort((a,b)=>b.tickets-a.tickets).slice(0,6); delete e._iss; }
+  Object.defineProperty(out,'__unmatched',{value:unmatched.sort((a,b)=>b[1]-a[1]),enumerable:false});
+  _SUPIX=out; _SUPIX_TOK=tok; return out;
+}
+function supOf(name){ return supportByClient()[name]||{hours:0,tickets:0,reopened:0,topIssues:[]}; }
+function costToServe(m){ return supOf(m.n).hours*COST_RATE; }
+function marginOf(m){ return totMRR(m)*12-costToServe(m); }
+window.setCostRate=function(v){ COST_RATE=Math.max(1,+v||70); if(state.page==='risk')renderRisk(); else if(state.page==='ops')renderOps(); };
+
+function renderRisk(){
+  const el=document.getElementById('pg-risk');
+  if(!hasData){ el.innerHTML='<h1 class="ph">Profitability <em>&amp; Risk</em></h1><div class="note">Load the dashboard on the Data Hub first.</div>'; return; }
+  if(!window.SUPPORT||!Array.isArray(window.SUPPORT.clients)){ el.innerHTML='<h1 class="ph">Profitability <em>&amp; Risk</em></h1><div class="note"><b>No Autotask support feed.</b> This page reads <code>autotask-support.json</code> from storage — run the support extract on the office device.</div>'; return; }
+  const rows=filteredMeta().filter(m=>isClient(m)&&totMRR(m)>0).map(m=>{
+    const s=supOf(m.n),rev=totMRR(m)*12,cost=s.hours*COST_RATE,margin=rev-cost;
+    return {m,rev,hours:s.hours,tickets:s.tickets,cost,margin,pct:rev>0?margin/rev*100:0,noise:rev>0?s.hours/(rev/1000):0};
+  }).sort((a,b)=>a.margin-b.margin);
+  const under=rows.filter(r=>r.margin<0);
+  const totRev=rows.reduce((a,r)=>a+r.rev,0),totCost=rows.reduce((a,r)=>a+r.cost,0),totHrs=rows.reduce((a,r)=>a+r.hours,0);
+  const bookPct=totRev>0?((totRev-totCost)/totRev*100):0;
+  const heavy=rows.filter(r=>r.hours>0).sort((a,b)=>b.noise-a.noise).slice(0,20);
+  const quiet=rows.filter(r=>r.hours>0&&r.pct>=60).sort((a,b)=>b.margin-a.margin).slice(0,20);
+  const cls=p=>p<0?'neg':(p<40?'warn':'pos');
+  el.innerHTML=`
+  <h1 class="ph">Profitability <em>&amp; Risk</em></h1>
+  <p class="psub">Each client's annual revenue against what it costs to serve them — Autotask support hours at a loaded engineer rate — so you can see margin and where pricing is out of step with effort. Revenue is NetSuite MRR × 12; cost is worked hours × the rate below. Automated and internal tickets are excluded.</p>
+  <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:6px 0 14px">
+    <label style="font-size:13px;color:var(--mut)">Loaded engineer cost / hour
+      <input type="number" min="1" value="${COST_RATE}" onchange="setCostRate(this.value)" style="width:90px;margin-left:8px;background:var(--panel);border:1px solid var(--line);color:#fff;border-radius:7px;padding:6px 9px"></label>
+    <span class="hint" style="margin:0">Change the rate to see every margin move.</span>
+  </div>
+  <div class="cards">
+    <div class="card ${under.length?'hl':''}"><div class="k">Clients underwater</div><div class="v ${under.length?'neg':''}">${under.length}</div><div class="s">cost to serve &gt; revenue</div></div>
+    <div class="card"><div class="k">Book margin</div><div class="v ${bookPct<0?'neg':'pos'}">${bookPct.toFixed(1)}%</div><div class="s">${fmtE(totRev-totCost)} of ${fmtE(totRev)}/yr</div></div>
+    <div class="card"><div class="k">Annual cost to serve</div><div class="v">${fmtE(totCost)}</div><div class="s">${Math.round(totHrs).toLocaleString()} hrs @ €${COST_RATE}</div></div>
+    <div class="card"><div class="k">Clients analysed</div><div class="v">${rows.length}</div><div class="s">revenue &amp; support matched</div></div>
+  </div>
+  <div class="panel"><h3>Lowest margin — pricing attention</h3>
+  <div class="hint">Worst margin first. Negative means you spend more serving them than they pay. Thin margin with a high noise index (support hours per €1k of revenue) is the clearest re-pricing case.</div>
+  <div class="twrap" style="max-height:560px"><table><thead><tr><th>Client</th><th>Owner</th><th class="num">Annual rev</th><th class="num">Tickets</th><th class="num">Hours</th><th class="num">Cost to serve</th><th class="num">Margin</th><th class="num">Margin %</th><th class="num">Noise</th></tr></thead><tbody>
+  ${rows.slice(0,90).map(r=>`<tr>
+    <td class="clink" onclick="goClient('${jsq(r.m.n)}')">${esc(r.m.n)}</td>
+    <td>${esc(ownerOf(r.m.n))}</td>
+    <td class="num">${fmtE(r.rev)}</td>
+    <td class="num">${r.tickets.toLocaleString()}</td>
+    <td class="num">${r.hours.toLocaleString()}</td>
+    <td class="num">${fmtE(r.cost)}</td>
+    <td class="num ${r.margin<0?'neg':'pos'}">${fmtE(r.margin)}</td>
+    <td class="num ${cls(r.pct)}">${r.pct.toFixed(0)}%</td>
+    <td class="num ${r.noise>8?'warn':''}">${r.noise.toFixed(1)}</td></tr>`).join('')}
+  </tbody></table></div></div>
+  <div class="two">
+    <div class="panel"><h3>High-maintenance — highest noise</h3><div class="hint">Most support hours per €1k of revenue. Re-price, review the contract, or fix a recurring root cause.</div>
+    <div class="twrap" style="max-height:360px"><table><thead><tr><th>Client</th><th class="num">Hours</th><th class="num">Noise</th><th class="num">Margin %</th></tr></thead><tbody>
+    ${heavy.map(r=>`<tr><td class="clink" onclick="goClient('${jsq(r.m.n)}')">${esc(r.m.n)}</td><td class="num">${r.hours.toLocaleString()}</td><td class="num warn">${r.noise.toFixed(1)}</td><td class="num ${cls(r.pct)}">${r.pct.toFixed(0)}%</td></tr>`).join('')}
+    </tbody></table></div></div>
+    <div class="panel"><h3>Quiet earners — healthy &amp; low noise</h3><div class="hint">Strong margin with low support demand — best relationships, and reference/expansion candidates.</div>
+    <div class="twrap" style="max-height:360px"><table><thead><tr><th>Client</th><th class="num">Annual rev</th><th class="num">Margin %</th><th class="num">Hours</th></tr></thead><tbody>
+    ${quiet.map(r=>`<tr><td class="clink" onclick="goClient('${jsq(r.m.n)}')">${esc(r.m.n)}</td><td class="num">${fmtE(r.rev)}</td><td class="num pos">${r.pct.toFixed(0)}%</td><td class="num">${r.hours.toLocaleString()}</td></tr>`).join('')}
+    </tbody></table></div></div>
+  </div>`;
+}
+
+function renderOps(){
+  const el=document.getElementById('pg-ops');
+  if(!hasData){ el.innerHTML='<h1 class="ph">Operations <em>· Autotask</em></h1><div class="note">Load the dashboard on the Data Hub first.</div>'; return; }
+  const devTot=window.DEVICE_COUNTS?Object.values(window.DEVICE_COUNTS).reduce((a,b)=>a+(+b||0),0):0;
+  const sup=window.SUPPORT;
+  const tickets=sup?(sup.totalTickets||0):0,hrs=sup?(sup.totalWorkedHours||0):0,cost=hrs*COST_RATE;
+  const iss={};
+  if(sup&&Array.isArray(sup.clients)) for(const c of sup.clients) for(const it of (c.topIssues||[])){ const g=iss[it.type]=iss[it.type]||{tickets:0,hours:0}; g.tickets+=+it.tickets||0; g.hours+=+it.hours||0; }
+  const issRows=Object.entries(iss).map(([type,v])=>({type,tickets:v.tickets,hours:Math.round(v.hours)})).sort((a,b)=>b.tickets-a.tickets).slice(0,15);
+  const byHrs=sup&&sup.clients?[...sup.clients].sort((a,b)=>(+b.workedHours)-(+a.workedHours)).slice(0,20):[];
+  const dsync=window.DEVICE_SOURCE&&window.DEVICE_SOURCE.at?new Date(window.DEVICE_SOURCE.at).toLocaleDateString('en-IE'):'—';
+  const ssync=sup&&sup.generatedAt?new Date(sup.generatedAt).toLocaleDateString('en-IE'):'—';
+  el.innerHTML=`
+  <h1 class="ph">Operations <em>· Autotask</em></h1>
+  <p class="psub">The service side of the business — the estate under management and the support effort it generates. Devices synced ${dsync}; support synced ${ssync}. Tickets exclude automated monitoring and internal work.${sup?'':' <b>Support feed not loaded.</b>'}</p>
+  <div class="cards">
+    <div class="card"><div class="k">Managed devices</div><div class="v">${devTot.toLocaleString()}</div><div class="s">${window.DEVICE_COUNTS?Object.keys(window.DEVICE_COUNTS).length:0} sites</div></div>
+    <div class="card"><div class="k">Tickets · 12m</div><div class="v">${tickets.toLocaleString()}</div><div class="s">human-submitted</div></div>
+    <div class="card"><div class="k">Support hours · 12m</div><div class="v">${Math.round(hrs).toLocaleString()}</div><div class="s">logged labour</div></div>
+    <div class="card"><div class="k">Cost to serve</div><div class="v">${fmtE(cost)}</div><div class="s">@ €${COST_RATE}/hr</div></div>
+  </div>
+  <div class="two">
+    <div class="panel"><h3>Where the effort goes — issue types</h3><div class="hint">Across the book. Recurring high-volume types point to a product fix or an upsell — account &amp; licensing noise suggests SSO/MFA, email issues better filtering, and so on.</div>
+    <div class="twrap" style="max-height:440px"><table><thead><tr><th>Issue type</th><th class="num">Tickets</th><th class="num">Hours</th></tr></thead><tbody>
+    ${issRows.map(r=>`<tr><td>${esc(r.type)}</td><td class="num">${r.tickets.toLocaleString()}</td><td class="num">${r.hours.toLocaleString()}</td></tr>`).join('')||'<tr><td colspan=3 class="hint">No issue data.</td></tr>'}
+    </tbody></table></div></div>
+    <div class="panel"><h3>Heaviest clients by support hours</h3><div class="hint">The biggest draws on the service desk — cross-check against revenue on Profitability &amp; Risk.</div>
+    <div class="twrap" style="max-height:440px"><table><thead><tr><th>Client (Autotask name)</th><th class="num">Hours</th><th class="num">Tickets</th></tr></thead><tbody>
+    ${byHrs.map(c=>`<tr><td>${esc(c.site)}</td><td class="num">${(+c.workedHours).toLocaleString()}</td><td class="num">${(+c.tickets).toLocaleString()}</td></tr>`).join('')||'<tr><td colspan=3 class="hint">No support data.</td></tr>'}
+    </tbody></table></div></div>
+  </div>`;
+}
+
+const RENDER={multisite:renderMultiSite,action:renderAction,ownermap:renderOwnerMap,match:renderMatch,diag:renderDiag,exec:renderExec,radar:renderRadar,fin:renderFin,kpi:renderKpi,c360:renderC360,risk:renderRisk,ops:renderOps,price:renderPrice,gap:renderGap,m365:renderM365,posture:renderPosture,cyber:renderCyber,nis2:renderNis2,win10:renderWin10,pkg:renderPkg,am:renderAm,health:renderHealth,churn:renderChurn,crm:renderCrm,pipeline:renderPipeline,leads:renderLeads,assign:renderAssign,recon:renderRecon,pending:renderPending,data:renderData};
 
 /* ================= CRM (Nimble) merge layer ================= */
 const AM_ROSTER={DF:'David Flood',DG:'David Groark',DMcD:'David McDonald',DOC:"Derek O'Callaghan",EB:'Emil Badea',EJ:'Eoghan Johnson',SC:'Simon Collins',MD:'Michael Daly',EG:'Eamon Gallagher'};
@@ -3346,6 +3470,18 @@ async function loadAutotaskDevices(){
     }
   }catch(e){}
 }
+async function loadAutotaskSupport(){
+  try{
+    const r=await fetch('/api/getSource/autotask-support',{credentials:'include',cache:'no-store'});
+    if(!r.ok) return;
+    const j=await r.json();
+    if(j && Array.isArray(j.clients)){
+      window.SUPPORT=j;
+      if(j.loadedRatePerHour) COST_RATE=+j.loadedRatePerHour||COST_RATE;
+      try{ SOURCE_DATA['autotasksupport']={data:j,loadedAt:(j.generatedAt||new Date().toISOString())}; saveSourceData(); }catch(e){}
+    }
+  }catch(e){}
+}
 function _startBuild(){
   if(hasData){
     buildFbar();applyPreset('ttm');syncMonthInputs();go('action');
@@ -3354,7 +3490,7 @@ function _startBuild(){
     buildDataset({source:'feed',silent:true}).then(ok=>{ if(ok) go('action'); });
   }
 }
-loadAutotaskDevices().then(_startBuild,_startBuild);
+Promise.all([loadAutotaskDevices(),loadAutotaskSupport()]).then(_startBuild,_startBuild);
 Promise.all(getSources().filter(s=>s.role!=='primary'&&s.id!=='autotask').map(s=>
   fetch(s.url,{credentials:'include',cache:'no-store'}).then(r=>r.ok?r.json():null).then(json=>{
     if(json){ SOURCE_DATA[s.id]={data:json,loadedAt:new Date().toISOString()}; saveSourceData(); return true; }
