@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IT.ie — Connection Test</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#161b22; --line:#273040; --ink:#e8edf4; --sub:#8b97a8;
+    --accent:#ff9f43; --ok:#2ecc71; --warn:#f1c40f; --bad:#e5484d; --test:#5b6472;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  header{padding:28px 24px 10px;max-width:1040px;margin:0 auto}
+  h1{font-size:22px;margin:0 0 4px;font-weight:650}
+  h1 em{color:var(--accent);font-style:normal}
+  .sub{color:var(--sub);margin:0 0 18px;font-size:14px}
+  .bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 6px}
+  button{background:var(--accent);color:#10131a;border:0;border-radius:9px;
+    padding:9px 16px;font-weight:650;cursor:pointer;font-size:14px}
+  button:disabled{opacity:.5;cursor:default}
+  .tag{font-size:12px;color:var(--sub)}
+  main{max-width:1040px;margin:0 auto;padding:8px 24px 48px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    padding:18px 20px;margin:14px 0}
+  .top{display:flex;align-items:center;gap:12px}
+  .dot{width:12px;height:12px;border-radius:50%;background:var(--test);flex:none;
+    box-shadow:0 0 0 4px rgba(255,255,255,.03)}
+  .dot.ok{background:var(--ok)} .dot.warn{background:var(--warn)} .dot.bad{background:var(--bad)}
+  .dot.test{background:var(--test);animation:pulse 1s infinite}
+  @keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}
+  .name{font-weight:650;font-size:16px}
+  .role{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--sub);
+    border:1px solid var(--line);border-radius:999px;padding:2px 9px}
+  .state{margin-left:auto;font-weight:600;font-size:14px}
+  .state.ok{color:var(--ok)} .state.warn{color:var(--warn)} .state.bad{color:var(--bad)}
+  .state.test{color:var(--sub)}
+  .meta{display:flex;gap:26px;flex-wrap:wrap;margin:14px 0 0;color:var(--sub);font-size:13px}
+  .meta b{color:var(--ink);font-weight:600}
+  .detail{margin-top:12px;background:#0b0e13;border:1px solid var(--line);border-radius:9px;
+    padding:11px 13px;font:12px/1.5 var(--mono);color:#c6cedd;white-space:pre-wrap;
+    word-break:break-word;max-height:220px;overflow:auto;display:none}
+  .detail.show{display:block}
+  .flip{font-size:12px;color:var(--accent);cursor:pointer;margin-top:10px;display:inline-block}
+  .note{font-size:13px;color:var(--sub);margin-top:10px}
+  footer{max-width:1040px;margin:0 auto;padding:0 24px 40px;color:var(--sub);font-size:12.5px}
+  a{color:var(--accent)}
+</style>
+</head>
+<body>
+<header>
+  <h1>IT.ie <em>Revenue Intelligence</em> — Connection Test</h1>
+  <p class="sub">Checks each data feed through your Azure tenant, behind your Microsoft 365 sign-in. Nothing is stored; this page only reports whether each source answers.</p>
+  <div class="bar">
+    <button id="run">Run all tests</button>
+    <span class="tag" id="ranAt"></span>
+  </div>
+</header>
+<main id="cards"></main>
+<footer>
+  Lightweight probe: NetSuite is tested for a single recent month (not the full pull), Nimble for one page.
+  Autotask reads the nightly sync file from storage — it shows red until the office sync job is in place.
+</footer>
+
+<script>
+const SOURCES = [
+  { key:'netsuite', name:'NetSuite', role:'Revenue · primary', kind:'netsuite' },
+  { key:'crm',      name:'Nimble CRM', role:'Owners · secondary', kind:'crm' },
+  { key:'autotask', name:'Autotask', role:'Devices · secondary', kind:'autotask' },
+];
+
+function el(html){ const t=document.createElement('template'); t.innerHTML=html.trim(); return t.content.firstChild; }
+function pad(n){ return String(n).padStart(2,'0'); }
+function monthRange(){
+  const now=new Date();
+  const to=new Date(now.getFullYear(), now.getMonth(), 1);          // 1st of this month
+  const from=new Date(now.getFullYear(), now.getMonth()-1, 1);      // 1st of last month
+  const f=d=>d.getFullYear()+'-'+pad(d.getMonth()+1)+'-01';
+  return { from:f(from), to:f(to) };
+}
+
+function render(){
+  const wrap=document.getElementById('cards'); wrap.innerHTML='';
+  SOURCES.forEach(s=>{
+    wrap.appendChild(el(`
+      <div class="card" id="card-${s.key}">
+        <div class="top">
+          <span class="dot test" id="dot-${s.key}"></span>
+          <span class="name">${s.name}</span>
+          <span class="role">${s.role}</span>
+          <span class="state test" id="state-${s.key}">Testing…</span>
+        </div>
+        <div class="meta">
+          <span>Latency <b id="lat-${s.key}">—</b></span>
+          <span>Records <b id="rec-${s.key}">—</b></span>
+          <span>Updated <b id="upd-${s.key}">—</b></span>
+        </div>
+        <span class="flip" onclick="document.getElementById('det-${s.key}').classList.toggle('show')">Show raw response ▾</span>
+        <div class="detail" id="det-${s.key}"></div>
+      </div>`));
+  });
+}
+
+function set(key,{state,cls,lat,rec,upd,detail}){
+  const dot=document.getElementById('dot-'+key), st=document.getElementById('state-'+key);
+  dot.className='dot '+cls; st.className='state '+cls; st.textContent=state;
+  if(lat!=null) document.getElementById('lat-'+key).textContent=lat+' ms';
+  if(rec!=null) document.getElementById('rec-'+key).textContent=rec;
+  if(upd!=null) document.getElementById('upd-'+key).textContent=upd;
+  if(detail!=null) document.getElementById('det-'+key).textContent=detail;
+}
+
+function summarise(j){
+  if(Array.isArray(j)) return j.length+' rows';
+  if(j && typeof j==='object'){
+    if(Array.isArray(j.rows)) return j.rows.length+' rows'+(j.hasMore?' (more pages)':'');
+    if(Array.isArray(j.sites)) return j.sites.length+' sites';
+    if(Array.isArray(j.accounts)) return j.accounts.length+' accounts';
+    const k=Object.keys(j); return k.length+' keys: '+k.slice(0,6).join(', ');
+  }
+  return 'ok';
+}
+
+async function probe(s){
+  const t0=performance.now();
+  let url='/api/getSource/'+s.key;
+  if(s.kind==='netsuite'){ const r=monthRange(); url+='?from='+r.from+'&to='+r.to+'&page=0'; }
+  try{
+    const res=await fetch(url,{credentials:'include',cache:'no-store'});
+    const lat=Math.round(performance.now()-t0);
+    const text=await res.text();
+    let j=null; try{ j=JSON.parse(text); }catch(e){}
+    if(!res.ok){
+      set(s.key,{state:'HTTP '+res.status,cls:'bad',lat,rec:'—',
+        detail:text.slice(0,600)||('HTTP '+res.status)});
+      return;
+    }
+    if(j===null){
+      // Got HTML (e.g. the SPA fallback) instead of JSON — route not wired
+      set(s.key,{state:'No JSON',cls:'bad',lat,rec:'—',
+        detail:'Response was not JSON (likely the route does not exist yet):\n'+text.slice(0,300)});
+      return;
+    }
+    const rec=summarise(j);
+    let upd='—';
+    if(j.generatedAt||j.pulledAt) upd=new Date(j.generatedAt||j.pulledAt).toLocaleString('en-IE');
+    set(s.key,{state:'Connected',cls:'ok',lat,rec,upd,
+      detail:JSON.stringify(j,null,2).slice(0,2000)});
+  }catch(err){
+    const lat=Math.round(performance.now()-t0);
+    const msg=(s.kind==='autotask')
+      ? 'Not reachable — the office sync has not written a file yet, or the /api/getSource/autotask route is not deployed.'
+      : ('Request failed: '+(err.message||err));
+    set(s.key,{state:s.kind==='autotask'?'Awaiting sync':'Failed',
+      cls:s.kind==='autotask'?'warn':'bad',lat,rec:'—',detail:msg});
+  }
+}
+
+async function runAll(){
+  const btn=document.getElementById('run'); btn.disabled=true;
+  render();
+  await Promise.all(SOURCES.map(probe));
+  document.getElementById('ranAt').textContent='Last run: '+new Date().toLocaleString('en-IE');
+  btn.disabled=false;
+}
+document.getElementById('run').addEventListener('click',runAll);
+runAll();
+</script>
+</body>
+</html>
