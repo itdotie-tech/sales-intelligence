@@ -21,6 +21,16 @@ module.exports = async function (context, req) {
     if (id === 'netsuite') {
       context.res = { headers:{'Content-Type':'application/json'}, body: JSON.stringify(await getNetsuiteData({ page, from, to })) }; return;
     }
+    if (id === 'autotask') {
+      // Device counts are written nightly to blob storage by an office-network
+      // job (the warehouse is IP-restricted, so neither the browser nor this
+      // function can query it directly). Lazy require keeps storage faults off
+      // the NetSuite / Nimble feeds above.
+      const { readJsonBlob } = require('../shared/store');
+      const data = await readJsonBlob('autotask-devices.json');
+      if (!data) { context.res = { status:404, body:'No Autotask sync file found yet. The office device has not written one.' }; return; }
+      context.res = { headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) }; return;
+    }
     context.res = { status:404, body:`Unknown source '${id}'.` };
   } catch (e) { context.res = { status:502, body:'Source fetch failed: ' + (e.message || String(e)) }; }
 };

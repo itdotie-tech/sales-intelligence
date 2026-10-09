@@ -48,6 +48,15 @@ async function writeOverrides(obj){
   if(!r.ok) throw new Error('Storage write failed ('+r.status+').');
   return obj;
 }
+/* Generic read of any JSON blob in the same container (used by the Autotask
+   device feed, which a separate office job writes nightly). Returns null when
+   the blob is absent so the caller can report "not synced yet" rather than error. */
+async function readJsonBlob(blobName){
+  const r=await request('GET', `${CONTAINER}/${blobName}`, {}, {}, null);
+  if(r.status===404) return null;
+  if(!r.ok) throw new Error('Storage read failed ('+r.status+').');
+  try{ return JSON.parse(await r.text()); }catch(e){ return null; }
+}
 function applyPatch(cur, patch){
   const out={ ownerOverrides:{...cur.ownerOverrides,...(patch.ownerOverrides||{})},
     nameCrosswalk:{...cur.nameCrosswalk,...(patch.nameCrosswalk||{})},
@@ -56,4 +65,4 @@ function applyPatch(cur, patch){
   for(const g of ['ownerOverrides','nameCrosswalk','clientRenames','ownerIdMap']) for(const k of Object.keys(patch[g]||{})) if(patch[g][k]===null) delete out[g][k];
   return out;
 }
-module.exports = { readOverrides, writeOverrides, applyPatch, EMPTY };
+module.exports = { readOverrides, writeOverrides, applyPatch, readJsonBlob, EMPTY };
