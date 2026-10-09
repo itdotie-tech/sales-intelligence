@@ -821,7 +821,7 @@ function applyRenames(){
 
 const GROUP_OWNER={'EMEIS':"Derek O'Callaghan",'Bright Motor Group':'Eoghan Johnson','BMG':'Eoghan Johnson','EWL':'Emil Badea','Eastern Electrical':'Emil Badea'};
 function groupOwner(n){ if(!n)return ''; if(GROUP_OWNER[n])return GROUP_OWNER[n]; const g=(typeof groupOf==='function')?groupOf(n):null; return (g&&GROUP_OWNER[g])||''; }
-function ownerOf(n){ if(OWNER_OVR[n])return OWNER_OVR[n]; const g=groupOwner(n); if(g)return g; const m=metaByC[n]; return (m&&(m.ownerFinal||m.owner))||'Unassigned'; }
+function ownerOf(n){ if(OWNER_OVR[n])return OWNER_OVR[n]; const g=groupOwner(n); if(g)return g; const a=(typeof atSalesOwnerOf==='function')?atSalesOwnerOf(n):null; if(a)return a; const m=metaByC[n]; return (m&&(m.ownerFinal||m.owner))||'Unassigned'; }
 function filteredClients(){let x=[...Array(NC).keys()];if(state.owner)x=x.filter(i=>ownerOf(C[i])===state.owner);if(state.sel&&state.sel.size)x=x.filter(i=>state.sel.has(i));return x;}
 function idxSetOrNull(){const f=filteredClients();return f.length===NC?null:new Set(f);}
 function filteredMeta(){return filteredClients().map(i=>metaByC[C[i]]).filter(Boolean);}
@@ -2813,7 +2813,7 @@ function renderMultiSite(){
 }
 
 /* ================= Autotask support → cost-to-serve ================= */
-let COST_RATE=70;                 // loaded engineer €/hour
+let COST_RATE=85;                 // loaded engineer €/hour
 let PERIOD='w12';                 // w12 | ytd | y3
 const PERIOD_LABEL={w12:'Last 12 months',ytd:'This year',y3:'Last 3 years'};
 function periodMonths(){ return PERIOD==='w12'?12:PERIOD==='y3'?36:(new Date().getMonth()+1); }
@@ -2856,17 +2856,44 @@ function marginOf(m){ return totMRR(m)*periodMonths()-costToServe(m); }
 window.setCostRate=function(v){ COST_RATE=Math.max(1,+v||70); if(state.page==='risk')renderRisk(); else if(state.page==='ops')renderOps(); };
 window.setPeriod=function(p){ if(['w12','ytd','y3'].includes(p)){ PERIOD=p; if(state.page==='risk')renderRisk(); else if(state.page==='ops')renderOps(); } };
 
+/* ---- Autotask owners resolved to clients (sales owner preferred; technical owner kept) ---- */
+let _ATOWN=null,_ATOWN_TOK=null;
+function atOwnerByClient(){
+  if(!window.AT_OWNERS||!Array.isArray(window.AT_OWNERS.owners)||!hasData) return {};
+  const tok=(window.AT_OWNERS.generatedAt||'')+'|'+C.length;
+  if(_ATOWN&&_ATOWN_TOK===tok) return _ATOWN;
+  const P=PIPE,X=mapIndex(),ix=P.buildIndex(C),out={};
+  for(const row of window.AT_OWNERS.owners){
+    const site=row.site; if(!site) continue;
+    if(/^it\.?\s*ie$/i.test(site)) continue;
+    let comp=null;
+    if(NAME_OVR[site]&&cI[NAME_OVR[site]]!==undefined) comp=NAME_OVR[site];
+    if(!comp&&cI[site]!==undefined) comp=site;
+    if(!comp){ const mp=X.atToMapped[site.toLowerCase()]; if(mp&&cI[mp]!==undefined) comp=mp; }
+    if(!comp){ const m=P.matchSite(site,ix); if(m.name&&m.score>=0.999&&!P.blocked(site,m.name)) comp=m.name; }
+    if(!comp) continue;
+    const e=out[comp]=out[comp]||{votes:{},tech:null};
+    if(row.salesOwner){ e.votes[row.salesOwner]=(e.votes[row.salesOwner]||0)+1; }
+    if(row.techOwner&&!e.tech) e.tech=row.techOwner;
+  }
+  for(const k of Object.keys(out)){ const e=out[k]; let best=null,bn=0; for(const o of Object.keys(e.votes)){ if(e.votes[o]>bn){bn=e.votes[o];best=o;} } e.sales=best; delete e.votes; }
+  _ATOWN=out; _ATOWN_TOK=tok; return out;
+}
+function atSalesOwnerOf(n){ const e=atOwnerByClient()[n]; return (e&&e.sales)||null; }
+function techOwnerOf(n){ const e=atOwnerByClient()[n]; return (e&&e.tech)||''; }
+
 function renderRisk(){
   const el=document.getElementById('pg-risk');
   if(!hasData){ el.innerHTML='<h1 class="ph">Profitability <em>&amp; Risk</em></h1><div class="note">Load the dashboard on the Data Hub first.</div>'; return; }
   if(!window.SUPPORT||!Array.isArray(window.SUPPORT.clients)){ el.innerHTML='<h1 class="ph">Profitability <em>&amp; Risk</em></h1><div class="note"><b>No Autotask support feed.</b> This page reads <code>autotask-support.json</code> from storage — run the support extract on the office device.</div>'; return; }
   const months=periodMonths();
   const rows=filteredMeta().filter(m=>isClient(m)&&totMRR(m)>0).map(m=>{
-    const s=supOf(m.n),annual=totMRR(m)*12,rev=totMRR(m)*months,cost=s.hours*COST_RATE,margin=rev-cost;
-    return {m,rev,dev:m.dev||0,hours:s.hours,tickets:s.tickets,cost,margin,pct:rev>0?margin/rev*100:0,noise:annual>0?s.hours/(annual/1000):0};
+    const s=supOf(m.n),annual=totMRR(m)*12,rev=totMRR(m)*months,mit=supportMRR(m)*months,cost=s.hours*COST_RATE,margin=rev-cost;
+    return {m,rev,mit,other:rev-mit,dev:m.dev||0,hours:s.hours,tickets:s.tickets,cost,margin,pct:rev>0?margin/rev*100:0,noise:annual>0?s.hours/(annual/1000):0};
   }).sort((a,b)=>a.margin-b.margin);
   const under=rows.filter(r=>r.margin<0);
-  const totRev=rows.reduce((a,r)=>a+r.rev,0),totCost=rows.reduce((a,r)=>a+r.cost,0),totHrs=rows.reduce((a,r)=>a+r.hours,0);
+  const totRev=rows.reduce((a,r)=>a+r.rev,0),totMIT=rows.reduce((a,r)=>a+r.mit,0),totCost=rows.reduce((a,r)=>a+r.cost,0),totHrs=rows.reduce((a,r)=>a+r.hours,0);
+  const totOther=totRev-totMIT;
   const bookPct=totRev>0?((totRev-totCost)/totRev*100):0;
   const heavy=rows.filter(r=>r.hours>0).sort((a,b)=>b.noise-a.noise).slice(0,20);
   const quiet=rows.filter(r=>r.hours>0&&r.pct>=60).sort((a,b)=>b.margin-a.margin).slice(0,20);
@@ -2881,18 +2908,21 @@ function renderRisk(){
     <span class="hint" style="margin:0">Window: <b>${PERIOD_LABEL[PERIOD]}</b> · noise is annual hours per €1k revenue.</span>
   </div>
   <div class="cards">
-    <div class="card ${under.length?'hl':''}"><div class="k">Clients underwater</div><div class="v ${under.length?'neg':''}">${under.length}</div><div class="s">cost &gt; revenue</div></div>
-    <div class="card"><div class="k">Book margin</div><div class="v ${bookPct<0?'neg':'pos'}">${bookPct.toFixed(1)}%</div><div class="s">${fmtE(totRev-totCost)} of ${fmtE(totRev)}</div></div>
+    <div class="card"><div class="k">Overall revenue</div><div class="v">${fmtE(totRev)}</div><div class="s">${rows.length} clients · ${PERIOD_LABEL[PERIOD].toLowerCase()}</div></div>
+    <div class="card"><div class="k">Managed IT revenue</div><div class="v">${fmtE(totMIT)}</div><div class="s">${totRev>0?Math.round(totMIT/totRev*100):0}% of revenue</div></div>
+    <div class="card"><div class="k">Other recurring</div><div class="v">${fmtE(totOther)}</div><div class="s">non-Managed-IT lines</div></div>
     <div class="card"><div class="k">Cost to serve</div><div class="v">${fmtE(totCost)}</div><div class="s">${Math.round(totHrs).toLocaleString()} hrs @ €${COST_RATE}</div></div>
-    <div class="card"><div class="k">Clients analysed</div><div class="v">${rows.length}</div><div class="s">revenue &amp; support matched</div></div>
+    <div class="card ${bookPct<0?'hl':''}"><div class="k">Book margin</div><div class="v ${bookPct<0?'neg':'pos'}">${bookPct.toFixed(1)}%</div><div class="s">${fmtE(totRev-totCost)} margin</div></div>
+    <div class="card ${under.length?'hl':''}"><div class="k">Clients underwater</div><div class="v ${under.length?'neg':''}">${under.length}</div><div class="s">cost &gt; revenue</div></div>
   </div>
   <div class="panel"><h3>Lowest margin — pricing attention</h3>
   <div class="hint">Worst margin first for <b>${PERIOD_LABEL[PERIOD].toLowerCase()}</b>. Negative means you spend more serving them than they pay. Thin margin with a high noise index is the clearest re-pricing case.</div>
-  <div class="twrap" style="max-height:560px"><table><thead><tr><th>Client</th><th>Owner</th><th class="num">Devices</th><th class="num">Revenue</th><th class="num">Tickets</th><th class="num">Hours</th><th class="num">Cost</th><th class="num">Margin</th><th class="num">Margin %</th><th class="num">Noise</th></tr></thead><tbody>
+  <div class="twrap" style="max-height:560px"><table><thead><tr><th>Client</th><th>Owner</th><th class="num">Devices</th><th class="num">Managed IT</th><th class="num">Overall rev</th><th class="num">Tickets</th><th class="num">Hours</th><th class="num">Cost</th><th class="num">Margin</th><th class="num">Margin %</th><th class="num">Noise</th></tr></thead><tbody>
   ${rows.slice(0,90).map(r=>`<tr>
     <td class="clink" onclick="goClient('${jsq(r.m.n)}')">${esc(r.m.n)}</td>
     <td>${esc(ownerOf(r.m.n))}</td>
     <td class="num">${r.dev||'—'}</td>
+    <td class="num">${fmtE(r.mit)}</td>
     <td class="num">${fmtE(r.rev)}</td>
     <td class="num">${r.tickets.toLocaleString()}</td>
     <td class="num">${r.hours.toLocaleString()}</td>
@@ -3502,8 +3532,19 @@ async function loadAutotaskSupport(){
       if(!Array.isArray(j.clients)) j.clients=[j.clients];
       for(const c of j.clients){ if(c&&!Array.isArray(c.topIssues)) c.topIssues=c.topIssues?[c.topIssues]:[]; }
       window.SUPPORT=j;
-      if(j.loadedRatePerHour) COST_RATE=+j.loadedRatePerHour||COST_RATE;
       try{ SOURCE_DATA['autotasksupport']={data:j,loadedAt:(j.generatedAt||new Date().toISOString())}; saveSourceData(); }catch(e){}
+    }
+  }catch(e){}
+}
+async function loadAutotaskOwners(){
+  try{
+    const r=await fetch('/api/getSource/autotask-owners',{credentials:'include',cache:'no-store'});
+    if(!r.ok) return;
+    const j=await r.json();
+    if(j && j.owners){
+      if(!Array.isArray(j.owners)) j.owners=[j.owners];
+      window.AT_OWNERS=j;
+      try{ SOURCE_DATA['autotaskowners']={data:j,loadedAt:(j.generatedAt||new Date().toISOString())}; saveSourceData(); }catch(e){}
     }
   }catch(e){}
 }
@@ -3515,7 +3556,7 @@ function _startBuild(){
     buildDataset({source:'feed',silent:true}).then(ok=>{ if(ok) go('action'); });
   }
 }
-Promise.all([loadAutotaskDevices(),loadAutotaskSupport()]).then(_startBuild,_startBuild);
+Promise.all([loadAutotaskDevices(),loadAutotaskSupport(),loadAutotaskOwners()]).then(_startBuild,_startBuild);
 Promise.all(getSources().filter(s=>s.role!=='primary'&&s.id!=='autotask').map(s=>
   fetch(s.url,{credentials:'include',cache:'no-store'}).then(r=>r.ok?r.json():null).then(json=>{
     if(json){ SOURCE_DATA[s.id]={data:json,loadedAt:new Date().toISOString()}; saveSourceData(); return true; }
