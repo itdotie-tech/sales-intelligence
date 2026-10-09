@@ -1730,7 +1730,7 @@ function renderData(){
   const um=(DATA&&DATA.rmmUnmatched)||[];
   document.getElementById('pg-data').innerHTML=`
   <h1 class="ph">Data <em>Hub</em></h1>
-  <p class="psub">This dashboard reads live data from NetSuite and Nimble through your Azure tenant. Press Load now on a source to pull it, all processed inside your browser so nothing leaves this machine. A workbook is optional, the mapping is built in, so you only upload one to refresh names and services. The Site device count CSV is a manual upload. Nothing is kept unless you tick remember, so by default it opens blank when shared or reopened.</p>
+  <p class="psub">This dashboard reads live data from NetSuite and Nimble through your Azure tenant. Press Load now on a source to pull it, all processed inside your browser so nothing leaves this machine. A workbook is optional, the mapping is built in, so you only upload one to refresh names and services. Device counts come live from Autotask; the Site device count CSV is only an override. Nothing is kept unless you tick remember, so by default it opens blank when shared or reopened.</p>
   ${hasData?`<div class="note"><b>Dataset loaded.</b> ${NC} master companies across ${BRANCH.length||0} branch records, ${NM} months to ${DATA.maxDate}, last complete month ${DATA.lastFull}. <a href="#" onclick="resetData();return false">Clear it</a>.</div>`:''}
   <div class="panel"><h3>Connected data sources</h3>
   <div class="hint">Each source syncs independently. The source marked <b>primary</b> feeds this dashboard's revenue and client model — that's NetSuite. Any other source (a CRM, a helpdesk, anything else) is fetched and held ready for future pages to use, without touching the existing figures. Add as many as you need.</div>
@@ -1758,7 +1758,7 @@ function renderData(){
   <div class="filegrid">
     ${zone('workbook','Mapped build workbook',false,'Optional. The dashboard builds live from NetSuite. Upload a workbook only to override the live feed or refresh the bundled service mapping.','.xlsx')}
     ${zone('attrs','Client attributes',false,'Customers, Windows 10 Devices, Cyber Resilience Cert, Secure Score, Industry. Unlocks the Windows 10 page and the Secure Score signal.','.csv or .xlsx')}
-    ${zone('devices','Site device count',false,'Autotask device counts per site (Site, Total). Joined to clients via the mapping so you can compare devices held against devices billed.'+(window.DEVICE_COUNTS?' Currently loaded: '+Object.keys(window.DEVICE_COUNTS).length+' sites.':''),'.csv')}
+    ${zone('devices','Site device count',false,'Device counts now come automatically from the Autotask feed'+(window.DEVICE_SOURCE&&window.DEVICE_SOURCE.type==='autotask'&&window.DEVICE_SOURCE.at?', last synced '+new Date(window.DEVICE_SOURCE.at).toLocaleDateString('en-IE'):'')+'. Joined to clients via the mapping to compare devices held against devices billed. Upload a CSV only to override the feed.'+(window.DEVICE_COUNTS?' Currently loaded: '+Object.keys(window.DEVICE_COUNTS).length+' sites.':''),'.csv')}
     ${zone('mapping','Client & service mapping',false,'Update the built-in mapping (Client Mapping + Service Mapping sheets). Upload a newer reviewed workbook to refresh names, owners and service classification for everyone.'+(MAP_UPLOAD?' Using an uploaded mapping.':' Using the built-in mapping.'),'.xlsx')}
   </div>
   <label style="display:flex;align-items:center;gap:9px;margin-top:16px;font-size:13px;color:var(--mut);cursor:pointer">
@@ -3322,12 +3322,34 @@ function renderRecon(){
 function refresh(){if(!hasData&&state.page!=='pkg'&&state.page!=='diag'&&state.page!=='match'&&state.page!=='ownermap'&&state.page!=='action'&&state.page!=='multisite'&&!(['crm','recon','pipeline','leads','assign'].includes(state.page)&&hasCrm())){renderData();return;}RENDER[state.page]();}
 bindData();buildNav();
 loadCentralOverrides().then(loaded=>{ if(loaded){ if(hasData){ bindData(); buildNav(); rebuildOwnerFilter(); } if(state.page)refresh(); } });
-if(hasData){
-  buildFbar();applyPreset('ttm');syncMonthInputs();go('action');
-}else{
-  go(hasCrm()?'crm':'data');
-  buildDataset({source:'feed',silent:true}).then(ok=>{ if(ok) go('action'); });
+/* Autotask device counts come from a JSON file a job writes to blob storage
+   (the warehouse is IP-restricted, so this reads the synced snapshot, not the
+   warehouse). Populates window.DEVICE_COUNTS before the build so every device
+   page uses it. A manual CSV on the Data Hub still overrides it in-session. */
+async function loadAutotaskDevices(){
+  try{
+    const r=await fetch('/api/getSource/autotask',{credentials:'include',cache:'no-store'});
+    if(!r.ok) return;
+    const j=await r.json();
+    if(j && Array.isArray(j.sites)){
+      const dc={};
+      for(const s of j.sites){ if(s && s.site) dc[s.site]=+s.devices||0; }
+      if(Object.keys(dc).length){
+        window.DEVICE_COUNTS=dc;
+        window.DEVICE_SOURCE={type:'autotask',at:j.generatedAt||null,sites:j.sites.length,total:(j.totalDevices!=null?j.totalDevices:null)};
+      }
+    }
+  }catch(e){}
 }
+function _startBuild(){
+  if(hasData){
+    buildFbar();applyPreset('ttm');syncMonthInputs();go('action');
+  }else{
+    go(hasCrm()?'crm':'data');
+    buildDataset({source:'feed',silent:true}).then(ok=>{ if(ok) go('action'); });
+  }
+}
+loadAutotaskDevices().then(_startBuild,_startBuild);
 Promise.all(getSources().filter(s=>s.role!=='primary').map(s=>
   fetch(s.url,{credentials:'include',cache:'no-store'}).then(r=>r.ok?r.json():null).then(json=>{
     if(json){ SOURCE_DATA[s.id]={data:json,loadedAt:new Date().toISOString()}; saveSourceData(); return true; }
