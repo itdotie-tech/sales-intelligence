@@ -641,7 +641,8 @@ let DATA=null;
    See README for how each source's API route is wired up in Azure. */
 const SOURCES_DEFAULT=[
   {id:'netsuite',label:'NetSuite — revenue & clients',url:'/api/getSource/netsuite',role:'primary'},
-  {id:'crm',label:'CRM — pipeline & opportunities',url:'/api/getSource/crm',role:'secondary'}
+  {id:'crm',label:'Nimble — CRM & owners',url:'/api/getSource/nimble',role:'secondary'},
+  {id:'autotask',label:'Autotask — device estate',url:'/api/getSource/autotask',role:'secondary'}
 ];
 function getSources(){
   try{ const raw=localStorage.getItem('itie3_sources'); if(raw){const s=JSON.parse(raw); if(Array.isArray(s)&&s.length)return s;} }catch(e){}
@@ -1730,16 +1731,17 @@ function renderData(){
   const um=(DATA&&DATA.rmmUnmatched)||[];
   document.getElementById('pg-data').innerHTML=`
   <h1 class="ph">Data <em>Hub</em></h1>
-  <p class="psub">This dashboard reads live data from NetSuite and Nimble through your Azure tenant. Press Load now on a source to pull it, all processed inside your browser so nothing leaves this machine. A workbook is optional, the mapping is built in, so you only upload one to refresh names and services. Device counts come live from Autotask; the Site device count CSV is only an override. Nothing is kept unless you tick remember, so by default it opens blank when shared or reopened.</p>
+  <p class="psub">This dashboard runs on three live feeds through your Azure tenant — <b>NetSuite</b> (revenue & clients), <b>Nimble</b> (CRM & owners) and <b>Autotask</b> (device estate). Everything is connected, so there is nothing to upload: the mapping is built in and device counts come straight from Autotask. Processing happens inside your browser, so nothing leaves this machine. Nothing is kept unless you tick remember, so by default it opens blank when shared or reopened.</p>
   ${hasData?`<div class="note"><b>Dataset loaded.</b> ${NC} master companies across ${BRANCH.length||0} branch records, ${NM} months to ${DATA.maxDate}, last complete month ${DATA.lastFull}. <a href="#" onclick="resetData();return false">Clear it</a>.</div>`:''}
   <div class="panel"><h3>Connected data sources</h3>
-  <div class="hint">Each source syncs independently. The source marked <b>primary</b> feeds this dashboard's revenue and client model — that's NetSuite. Any other source (a CRM, a helpdesk, anything else) is fetched and held ready for future pages to use, without touching the existing figures. Add as many as you need.</div>
+  <div class="hint">Three live feeds drive the dashboard, each syncing independently: <b>NetSuite</b> is the primary revenue and client model, <b>Nimble</b> supplies account owners, and <b>Autotask</b> supplies the device estate. NetSuite and Nimble are pulled live on open; Autotask reads its latest sync from storage.</div>
   <div style="margin-top:10px;display:flex;flex-direction:column;gap:10px">
   ${getSources().map(s=>{
     const sd=SOURCE_DATA[s.id];
+    const secCount=sd?(Array.isArray(sd.data)?sd.data.length+' records':(sd.data&&Array.isArray(sd.data.sites)?sd.data.sites.length+' sites':(sd.data&&Array.isArray(sd.data.accounts)?sd.data.accounts.length+' accounts':'data'))):null;
     const statusTxt=s.role==='primary'
       ? (hasData?'Loaded into the dashboard':'Not loaded yet')
-      : (sd?('Loaded '+(Array.isArray(sd.data)?sd.data.length+' records':'data')+' · '+new Date(sd.loadedAt).toLocaleString()):'Not connected yet');
+      : (sd?('Loaded '+secCount+' · '+new Date(sd.loadedAt).toLocaleString()):'Not connected yet');
     return `<div style="border:1px solid var(--line);border-radius:10px;padding:12px;display:flex;flex-wrap:wrap;gap:8px;align-items:center">
     <input type="text" value="${esc(s.label)}" onchange="updateSource('${s.id}','label',this.value)" style="flex:1;min-width:180px;background:var(--panel);border:1px solid var(--line);color:#fff;border-radius:8px;padding:8px 12px">
     <input type="text" value="${esc(s.url)}" onchange="updateSource('${s.id}','url',this.value)" style="flex:1.5;min-width:220px;background:var(--panel);border:1px solid var(--line);color:#fff;border-radius:8px;padding:8px 12px" placeholder="/api/getSource/...">
@@ -1917,6 +1919,7 @@ async function loadSecondarySource(id){
     if(!res.ok) throw new Error('Request failed ('+res.status+')');
     const json=await res.json();
     SOURCE_DATA[id]={data:json,loadedAt:new Date().toISOString()};
+    if(id==='autotask'&&json&&Array.isArray(json.sites)){ const dc={}; for(const s of json.sites){ if(s&&s.site) dc[s.site]=+s.devices||0; } window.DEVICE_COUNTS=dc; window.DEVICE_SOURCE={type:'autotask',at:json.generatedAt||null,sites:json.sites.length,total:(json.totalDevices!=null?json.totalDevices:null)}; try{rebuildFromCache&&rebuildFromCache();}catch(e){} }
     saveSourceData();
     // re-run the merge now so ownership fills immediately, whatever order things were loaded in
     crmAnalyse();
@@ -3320,6 +3323,7 @@ function renderRecon(){
 }
 
 function refresh(){if(!hasData&&state.page!=='pkg'&&state.page!=='diag'&&state.page!=='match'&&state.page!=='ownermap'&&state.page!=='action'&&state.page!=='multisite'&&!(['crm','recon','pipeline','leads','assign'].includes(state.page)&&hasCrm())){renderData();return;}RENDER[state.page]();}
+(function ensureAutotaskSource(){ try{ const list=getSources(); if(!list.some(s=>s.id==='autotask')){ list.push({id:'autotask',label:'Autotask — device estate',url:'/api/getSource/autotask',role:'secondary'}); saveSources(list); } }catch(e){} })();
 bindData();buildNav();
 loadCentralOverrides().then(loaded=>{ if(loaded){ if(hasData){ bindData(); buildNav(); rebuildOwnerFilter(); } if(state.page)refresh(); } });
 /* Autotask device counts come from a JSON file a job writes to blob storage
@@ -3337,6 +3341,7 @@ async function loadAutotaskDevices(){
       if(Object.keys(dc).length){
         window.DEVICE_COUNTS=dc;
         window.DEVICE_SOURCE={type:'autotask',at:j.generatedAt||null,sites:j.sites.length,total:(j.totalDevices!=null?j.totalDevices:null)};
+        try{ SOURCE_DATA['autotask']={data:j,loadedAt:(j.generatedAt||new Date().toISOString())}; saveSourceData(); }catch(e){}
       }
     }
   }catch(e){}
@@ -3350,7 +3355,7 @@ function _startBuild(){
   }
 }
 loadAutotaskDevices().then(_startBuild,_startBuild);
-Promise.all(getSources().filter(s=>s.role!=='primary').map(s=>
+Promise.all(getSources().filter(s=>s.role!=='primary'&&s.id!=='autotask').map(s=>
   fetch(s.url,{credentials:'include',cache:'no-store'}).then(r=>r.ok?r.json():null).then(json=>{
     if(json){ SOURCE_DATA[s.id]={data:json,loadedAt:new Date().toISOString()}; saveSourceData(); return true; }
   }).catch(()=>{})
