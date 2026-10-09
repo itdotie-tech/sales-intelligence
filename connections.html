@@ -66,9 +66,12 @@
 
 <script>
 const SOURCES = [
-  { key:'netsuite', name:'NetSuite', role:'Revenue · primary', kind:'netsuite' },
-  { key:'crm',      name:'Nimble CRM', role:'Owners · secondary', kind:'crm' },
-  { key:'autotask', name:'Autotask', role:'Devices · secondary', kind:'autotask' },
+  { key:'netsuite', name:'NetSuite', role:'Revenue · primary', kind:'netsuite',
+    urls:['/api/getSource/netsuite'] },
+  { key:'nimble', name:'Nimble CRM', role:'Owners · secondary', kind:'crm',
+    urls:['/api/getSource/nimble','/api/getSource/nimbletags?page=0','/api/getSource/crm'] },
+  { key:'autotask', name:'Autotask', role:'Devices · secondary', kind:'autotask',
+    urls:['/api/getSource/autotask'] },
 ];
 
 function el(html){ const t=document.createElement('template'); t.innerHTML=html.trim(); return t.content.firstChild; }
@@ -125,36 +128,37 @@ function summarise(j){
 
 async function probe(s){
   const t0=performance.now();
-  let url='/api/getSource/'+s.key;
-  if(s.kind==='netsuite'){ const r=monthRange(); url+='?from='+r.from+'&to='+r.to+'&page=0'; }
-  try{
-    const res=await fetch(url,{credentials:'include',cache:'no-store'});
-    const lat=Math.round(performance.now()-t0);
-    const text=await res.text();
-    let j=null; try{ j=JSON.parse(text); }catch(e){}
-    if(!res.ok){
-      set(s.key,{state:'HTTP '+res.status,cls:'bad',lat,rec:'—',
-        detail:text.slice(0,600)||('HTTP '+res.status)});
-      return;
+  const mr=monthRange();
+  // Try each candidate URL in turn; first one that returns parseable JSON wins.
+  let lastStatus='', lastText='';
+  for(const base of s.urls){
+    let url=base;
+    if(s.kind==='netsuite'){ url+=(url.includes('?')?'&':'?')+'from='+mr.from+'&to='+mr.to+'&page=0'; }
+    try{
+      const res=await fetch(url,{credentials:'include',cache:'no-store'});
+      const text=await res.text();
+      let j=null; try{ j=JSON.parse(text); }catch(e){}
+      if(res.ok && j!==null){
+        const lat=Math.round(performance.now()-t0);
+        let upd='—';
+        if(j.generatedAt||j.pulledAt) upd=new Date(j.generatedAt||j.pulledAt).toLocaleString('en-IE');
+        set(s.key,{state:'Connected',cls:'ok',lat,rec:summarise(j),upd,
+          detail:'Endpoint: '+url+'\n\n'+JSON.stringify(j,null,2).slice(0,1800)});
+        return;
+      }
+      lastStatus='HTTP '+res.status; lastText=text.slice(0,400);
+    }catch(err){
+      lastStatus='network'; lastText=(err.message||String(err));
     }
-    if(j===null){
-      // Got HTML (e.g. the SPA fallback) instead of JSON — route not wired
-      set(s.key,{state:'No JSON',cls:'bad',lat,rec:'—',
-        detail:'Response was not JSON (likely the route does not exist yet):\n'+text.slice(0,300)});
-      return;
-    }
-    const rec=summarise(j);
-    let upd='—';
-    if(j.generatedAt||j.pulledAt) upd=new Date(j.generatedAt||j.pulledAt).toLocaleString('en-IE');
-    set(s.key,{state:'Connected',cls:'ok',lat,rec,upd,
-      detail:JSON.stringify(j,null,2).slice(0,2000)});
-  }catch(err){
-    const lat=Math.round(performance.now()-t0);
-    const msg=(s.kind==='autotask')
-      ? 'Not reachable — the office sync has not written a file yet, or the /api/getSource/autotask route is not deployed.'
-      : ('Request failed: '+(err.message||err));
-    set(s.key,{state:s.kind==='autotask'?'Awaiting sync':'Failed',
-      cls:s.kind==='autotask'?'warn':'bad',lat,rec:'—',detail:msg});
+  }
+  // Nothing worked
+  const lat=Math.round(performance.now()-t0);
+  if(s.kind==='autotask'){
+    set(s.key,{state:'Awaiting sync',cls:'warn',lat,rec:'—',
+      detail:'Not wired yet — this is expected. Needs the office sync to write autotask.json AND an /api/getSource/autotask route.\n\nLast response: '+lastStatus+'\n'+lastText});
+  }else{
+    set(s.key,{state:lastStatus||'Failed',cls:'bad',lat,rec:'—',
+      detail:'Tried:\n'+s.urls.join('\n')+'\n\nLast response: '+lastStatus+'\n'+lastText});
   }
 }
 
