@@ -451,7 +451,7 @@ const PIPE = (() => {
     const recEq=Array.from({length:NC},()=>new Float64Array(NM));
     const recEqSvc=new Map();
     const brRec=new Map();          // branch -> Float64Array (monthly-eq recurring)
-    const rowsByC={}, ttmR={}, ttmN={}, firstBy={}, lastBy={};
+    const rowsByC={}, ttmR={}, ttmN={}, ttm6={}, firstBy={}, lastBy={};
 
     for(const r of rows){
       const ci=cI[r.master], mi=mI[r.month];
@@ -475,6 +475,7 @@ const PIPE = (() => {
         }
       }
       if(L12.has(r.month)){ if(r.rc===0) ttmR[r.master]=(ttmR[r.master]||0)+r.amount; else ttmN[r.master]=(ttmN[r.master]||0)+r.amount; }
+      if(WIN.has(r.month)) ttm6[r.master]=(ttm6[r.master]||0)+r.amount;  // last 6 complete months, all incoming
       if(WIN.has(r.month)&&r.amount>0) (rowsByC[r.master]=rowsByC[r.master]||[]).push(r);
     }
 
@@ -574,7 +575,7 @@ const PIPE = (() => {
       return {
         n:c, br:brs.length>1?brs:[], dev:devByComp[c]||0,
         seats:Math.round(seats), tier,
-        mrr, ttmR:Math.round((ttmR[c]||0)*100)/100, ttmN:Math.round((ttmN[c]||0)*100)/100,
+        mrr, ttmR:Math.round((ttmR[c]||0)*100)/100, ttmN:Math.round((ttmN[c]||0)*100)/100, ttm6:Math.round((ttm6[c]||0)*100)/100,
         first:firstBy[c]||'', last:lastBy[c]||'',
         caps, cp,
         m365:Object.fromEntries(Object.entries(mp).filter(([,v])=>v.last>=recentCut).map(([p,v])=>[p,{s:Math.round(v.maxQ),l:v.last}])),
@@ -820,8 +821,29 @@ function applyRenames(){
 }
 
 const GROUP_OWNER={'EMEIS':"Derek O'Callaghan",'Bright Motor Group':'Eoghan Johnson','BMG':'Eoghan Johnson','EWL':'Emil Badea','Eastern Electrical':'Emil Badea'};
-function groupOwner(n){ if(!n)return ''; if(GROUP_OWNER[n])return GROUP_OWNER[n]; const g=(typeof groupOf==='function')?groupOf(n):null; return (g&&GROUP_OWNER[g])||''; }
-function ownerOf(n){ if(OWNER_OVR[n])return OWNER_OVR[n]; const g=groupOwner(n); if(g)return g; const a=(typeof atSalesOwnerOf==='function')?atSalesOwnerOf(n):null; if(a)return a; const m=metaByC[n]; return (m&&(m.ownerFinal||m.owner))||'Unassigned'; }
+/* Name-based account-manager rules (match anywhere in the client name). */
+const GROUP_RULES=[
+  [/greenman/i,'David Groark'],
+  [/echelon/i,'David Groark'],
+  [/emeis/i,"Derek O'Callaghan"],
+  [/bright\s*motor/i,'Eoghan Johnson'],
+  [/\bewl\b/i,'Emil Badea'],
+  [/eastern electrical/i,'Emil Badea']
+];
+/* The only owner names we accept — the sales team. Anything else → Unassigned. */
+const SALES_SET=new Set(['David Flood','David Groark','David McDonald',"Derek O'Callaghan",'Eoghan Johnson','Emil Badea','Michael Daly','Simon Collins']);
+function groupOwner(n){ if(!n)return ''; for(const [re,who] of GROUP_RULES){ if(re.test(n)) return who; } if(GROUP_OWNER[n])return GROUP_OWNER[n]; const g=(typeof groupOf==='function')?groupOf(n):null; return (g&&GROUP_OWNER[g])||''; }
+/* Sales account manager for a client. Rules → Autotask sales owner → CRM/NetSuite
+   owner, but only ever a sales-team name; otherwise Unassigned. Technical owners
+   are never used. A manual override is respected as entered. */
+function ownerOf(n){
+  if(OWNER_OVR[n]) return OWNER_OVR[n];
+  const g=groupOwner(n); if(g) return g;
+  const canon=x=>(typeof canonAM==='function')?canonAM(x):x;
+  const a=(typeof atSalesOwnerOf==='function')?atSalesOwnerOf(n):null; const ca=canon(a); if(ca&&SALES_SET.has(ca)) return ca;
+  const m=metaByC[n]; const cm=canon((m&&(m.ownerFinal||m.owner))||''); if(cm&&SALES_SET.has(cm)) return cm;
+  return 'Unassigned';
+}
 function filteredClients(){let x=[...Array(NC).keys()];if(state.owner)x=x.filter(i=>ownerOf(C[i])===state.owner);if(state.sel&&state.sel.size)x=x.filter(i=>state.sel.has(i));return x;}
 function idxSetOrNull(){const f=filteredClients();return f.length===NC?null:new Set(f);}
 function filteredMeta(){return filteredClients().map(i=>metaByC[C[i]]).filter(Boolean);}
@@ -3008,12 +3030,24 @@ function renderQuality(){
   const el=document.getElementById('pg-quality');
   if(!hasData){ el.innerHTML='<h1 class="ph">Data <em>Quality</em></h1><div class="note">Load the dashboard on the Data Hub first.</div>'; return; }
   const cl=filteredMeta().filter(isClient);
+  const inc12=m=>(m.ttmR||0)+(m.ttmN||0);          // incoming revenue, last 12 months
+  const inc6=m=>(m.ttm6||0);                         // incoming revenue, last 6 months
+  const active=cl.filter(m=>inc12(m)>0);             // only revenue-generating clients count
   // 1. unmapped recurring revenue (fell to the Other bucket)
   const unmapped=cl.map(m=>({m,other:(m.mrr.Other||0)})).filter(r=>r.other>0).sort((a,b)=>b.other-a.other);
   const unmappedTot=unmapped.reduce((a,r)=>a+r.other,0);
-  // 2. clients with revenue but no sales owner
-  const noOwner=cl.map(m=>({m,mrr:totMRR(m)})).filter(r=>{const o=ownerOf(r.m.n);return (!o||o==='Unassigned')&&r.mrr>0;}).sort((a,b)=>b.mrr-a.mrr);
-  const noOwnerMo=noOwner.reduce((a,r)=>a+r.mrr,0);
+  // 2. revenue-generating clients with no sales owner
+  const noOwner=active.map(m=>({m,rev:inc12(m)})).filter(r=>{const o=ownerOf(r.m.n);return !o||o==='Unassigned';}).sort((a,b)=>b.rev-a.rev);
+  const noOwnerRev=noOwner.reduce((a,r)=>a+r.rev,0);
+  // lapsing: had revenue in last 12m but none in last 6m
+  const lapsing=active.filter(m=>inc6(m)<=0).map(m=>({m,rev:inc12(m),owner:ownerOf(m.n)})).sort((a,b)=>b.rev-a.rev);
+  // multi-site relationships: every location matched by a name rule, so branches
+  // shown under their own name are still caught under the one account manager.
+  const MSRULES=[['Greenman',/greenman/i,'David Groark'],['Echelon',/echelon/i,'David Groark'],['EMEIS',/emeis/i,"Derek O'Callaghan"],['Bright Motor',/bright\s*motor/i,'Eoghan Johnson'],['EWL',/\bewl\b/i,'Emil Badea']];
+  const msGroups=MSRULES.map(([label,re,who])=>{
+    const members=cl.filter(m=>re.test(m.n)).map(m=>({m,rev:inc12(m)})).sort((a,b)=>b.rev-a.rev);
+    return {label,who,members,rev:members.reduce((a,x)=>a+x.rev,0)};
+  }).filter(g=>g.members.length);
   // 3 & 4. Autotask sites that don't match a client
   const X=mapIndex(), ix=PIPE.buildIndex(C);
   const atUn=[];
@@ -3027,16 +3061,24 @@ function renderQuality(){
   const tbl=(head,rows,empty)=>`<div class="twrap" style="max-height:360px"><table><thead><tr>${head}</tr></thead><tbody>${rows||('<tr><td colspan=9 class="hint">'+empty+'</td></tr>')}</tbody></table></div>`;
   el.innerHTML=`
   <h1 class="ph">Data <em>Quality</em></h1>
-  <p class="psub">Where the data doesn't map to something — fix these in the mapping control file so the figures and any AI layer stay trustworthy. Covers revenue with no service family, clients with no sales owner, and Autotask sites that don't match a client.</p>
+  <p class="psub">Where the data doesn't map to something — fix these in the mapping control file so the figures and any AI layer stay trustworthy. Owner coverage counts only clients with incoming revenue in the last 12 months; non-revenue accounts (vendors, one-off jobs, churned) are excluded. Only sales-team names are used as owners — anything else is Unassigned.</p>
   <div class="cards">
+    ${card('Clients without an owner',noOwner.length,'€'+Math.round(noOwnerRev).toLocaleString()+' 12m revenue unassigned',noOwner.length>0)}
+    ${card('Lapsing (no revenue in 6m)',lapsing.length,'billed in 12m, nothing in last 6m',lapsing.length>0)}
     ${card('Unmapped recurring','€'+Math.round(unmappedTot).toLocaleString()+'/mo',unmapped.length+' clients with "Other" revenue',unmappedTot>0)}
-    ${card('Clients without an owner',noOwner.length,'€'+Math.round(noOwnerMo).toLocaleString()+'/mo unassigned',noOwner.length>0)}
     ${card('Autotask sites unmatched',atUn.length,'support not tied to a client',atUn.length>0)}
     ${card('Device sites unmatched',devUn.length,devUn.reduce((a,r)=>a+r.dev,0).toLocaleString()+' devices',devUn.length>0)}
   </div>
-  <div class="panel"><h3>Clients with revenue but no sales owner</h3><div class="hint">These carry MRR but resolve to "Unassigned". Assign an owner on the Owners tab of the mapping control file (or a group rule / override).</div>
-  ${tbl('<th>Client</th><th class="num">MRR/mo</th><th class="num">Annual</th>',
-    noOwner.slice(0,100).map(r=>`<tr><td class="clink" onclick="goClient('${jsq(r.m.n)}')">${esc(r.m.n)}</td><td class="num">${fmtE(r.mrr)}</td><td class="num">${fmtE(r.mrr*12)}</td></tr>`).join(''),'Every client with revenue has an owner.')}</div>
+  <div class="panel"><h3>Revenue-generating clients with no sales owner</h3><div class="hint">Billed in the last 12 months but resolve to "Unassigned" (no sales-team owner from Autotask, a group rule or an override). Assign on the Owners tab of the mapping control file. Sorted by 12-month revenue.</div>
+  ${tbl('<th>Client</th><th class="num">12m revenue</th><th class="num">MRR/mo now</th>',
+    noOwner.slice(0,120).map(r=>`<tr><td class="clink" onclick="goClient('${jsq(r.m.n)}')">${esc(r.m.n)}</td><td class="num">${fmtE(r.rev)}</td><td class="num">${fmtE(totMRR(r.m))}</td></tr>`).join(''),'Every revenue-generating client has a sales owner.')}</div>
+  <div class="panel"><h3>Lapsing clients — revenue in 12m but none in the last 6m</h3><div class="hint">Still inside the 12-month window but quiet for 6 months — possible churn or a billing gap. Worth a check before they drop out of the book entirely.</div>
+  ${tbl('<th>Client</th><th>Owner</th><th class="num">12m revenue</th>',
+    lapsing.slice(0,120).map(r=>`<tr><td class="clink" onclick="goClient('${jsq(r.m.n)}')">${esc(r.m.n)}</td><td>${esc(r.owner)}</td><td class="num">${fmtE(r.rev)}</td></tr>`).join(''),'No lapsing clients.')}</div>
+  <div class="panel"><h3>Multi-site relationships</h3><div class="hint">Every location whose name matches a group rule, with its account manager — so branches billed under their own name still roll to the right owner. Check each group holds all the sites you expect; a missing branch means its name doesn't contain the group keyword and needs a name override or a fix in the client name map.</div>
+  <div class="twrap" style="max-height:420px"><table><thead><tr><th>Group</th><th>Account manager</th><th>Location (as billed)</th><th class="num">12m revenue</th></tr></thead><tbody>
+  ${msGroups.map(g=>g.members.map((x,i)=>`<tr>${i===0?`<td rowspan="${g.members.length}"><b>${esc(g.label)}</b><br><span class="hint" style="margin:0">${g.members.length} sites · ${fmtE(g.rev)}</span></td><td rowspan="${g.members.length}">${esc(g.who)}</td>`:''}<td class="clink" onclick="goClient('${jsq(x.m.n)}')">${esc(x.m.n)}</td><td class="num">${fmtE(x.rev)}</td></tr>`).join('')).join('')||'<tr><td colspan=4 class="hint">No multi-site groups matched.</td></tr>'}
+  </tbody></table></div></div>
   <div class="two">
     <div class="panel"><h3>Unmapped revenue — "Other" family</h3><div class="hint">Recurring revenue the mapping couldn't place in a known service family. Classify the underlying NetSuite lines in the mapping control file.</div>
     ${tbl('<th>Client</th><th class="num">Other MRR/mo</th>',
