@@ -827,6 +827,7 @@ const GROUP_RULES=[
   [/echelon/i,'David Groark'],
   [/emeis/i,"Derek O'Callaghan"],
   [/bright\s*motor/i,'Eoghan Johnson'],
+  [/\bbmg\b/i,'Eoghan Johnson'],
   [/\bewl\b/i,'Emil Badea'],
   [/eastern electrical/i,'Emil Badea']
 ];
@@ -2894,6 +2895,11 @@ function atOwnerByClient(){
   const tok=(window.AT_OWNERS.generatedAt||'')+'|'+C.length;
   if(_ATOWN&&_ATOWN_TOK===tok) return _ATOWN;
   const P=PIPE,X=mapIndex(),ix=P.buildIndex(C),out={};
+  // normalised-name bridge: strip punctuation and common suffixes so Autotask
+  // company names resolve to the NetSuite client even when they're not identical.
+  const normNm=s=>String(s||'').toLowerCase().replace(/&/g,'and').replace(/\b(ltd|limited|group|holdings|holding|the|inc|plc|llc|co|ie|services|solutions)\b/g,'').replace(/[^a-z0-9]/g,'');
+  const normIx={},normDup={};
+  for(const nm of C){ const k=normNm(nm); if(k){ if(normIx[k]!==undefined && normIx[k]!==nm) normDup[k]=1; else normIx[k]=nm; } }
   for(const row of window.AT_OWNERS.owners){
     const site=row.site; if(!site) continue;
     if(/^it\.?\s*ie$/i.test(site)) continue;
@@ -2902,9 +2908,11 @@ function atOwnerByClient(){
     if(!comp&&cI[site]!==undefined) comp=site;
     if(!comp){ const mp=X.atToMapped[site.toLowerCase()]; if(mp&&cI[mp]!==undefined) comp=mp; }
     if(!comp){ const m=P.matchSite(site,ix); if(m.name&&m.score>=0.999&&!P.blocked(site,m.name)) comp=m.name; }
+    if(!comp){ const k=normNm(site); if(k&&!normDup[k]&&normIx[k]!==undefined) comp=normIx[k]; }
     if(!comp) continue;
     const e=out[comp]=out[comp]||{votes:{},tech:null};
-    if(row.salesOwner){ e.votes[row.salesOwner]=(e.votes[row.salesOwner]||0)+1; }
+    let so=row.salesOwner; if(!so){ const gr=groupOwner(site); if(gr) so=gr; }   // name rule on the Autotask company name
+    if(so){ e.votes[so]=(e.votes[so]||0)+1; }
     if(row.techOwner&&!e.tech) e.tech=row.techOwner;
   }
   for(const k of Object.keys(out)){ const e=out[k]; let best=null,bn=0; for(const o of Object.keys(e.votes)){ if(e.votes[o]>bn){bn=e.votes[o];best=o;} } e.sales=best; delete e.votes; }
