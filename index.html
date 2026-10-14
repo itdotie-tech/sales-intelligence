@@ -944,6 +944,7 @@ const PAGES=[
  ['c360','Client 360','M10 10a4 4 0 100-8 4 4 0 000 8zm-7 8a7 7 0 0114 0',2],
  ['risk','Profitability & Risk','M10 3v14M5 7l5-4 5 4M3 11a2 2 0 004 0M13 11a2 2 0 004 0',2],
  ['ops','Operations · Autotask','M10 7a3 3 0 100 6 3 3 0 000-6zM10 2v2M10 16v2M3 10h2M15 10h2',2],
+ ['quality','Data Quality','M10 2a8 8 0 100 16 8 8 0 000-16zM10 6v5M10 14h.01',4],
  ['price','Pricing Health','M10 2v16M6 6h6a3 3 0 010 6H7a3 3 0 000 6h7',0],
  ['gap','Gap Analysis','M3 3h6v6H3zM11 3h6v6h-6zM3 11h6v6H3zM11 11h6v6h-6z',0],
  ['m365','Microsoft 365','M3 3h6.5v6.5H3zM10.5 3H17v6.5h-6.5zM3 10.5h6.5V17H3zM10.5 10.5H17V17h-6.5z',0],
@@ -2994,7 +2995,59 @@ function renderOps(){
   </div>`;
 }
 
-const RENDER={multisite:renderMultiSite,action:renderAction,ownermap:renderOwnerMap,match:renderMatch,diag:renderDiag,exec:renderExec,radar:renderRadar,fin:renderFin,kpi:renderKpi,c360:renderC360,risk:renderRisk,ops:renderOps,price:renderPrice,gap:renderGap,m365:renderM365,posture:renderPosture,cyber:renderCyber,nis2:renderNis2,win10:renderWin10,pkg:renderPkg,am:renderAm,health:renderHealth,churn:renderChurn,crm:renderCrm,pipeline:renderPipeline,leads:renderLeads,assign:renderAssign,recon:renderRecon,pending:renderPending,data:renderData};
+/* ================= Data Quality — what doesn't map ================= */
+function _resolveSite(site,X,ix){
+  if(!site||/^it\.?\s*ie$/i.test(site)) return '__skip__';
+  if(NAME_OVR[site]&&cI[NAME_OVR[site]]!==undefined) return NAME_OVR[site];
+  if(cI[site]!==undefined) return site;
+  const mp=X.atToMapped[site.toLowerCase()]; if(mp&&cI[mp]!==undefined) return mp;
+  const m=PIPE.matchSite(site,ix); if(m.name&&m.score>=0.999&&!PIPE.blocked(site,m.name)) return m.name;
+  return null;
+}
+function renderQuality(){
+  const el=document.getElementById('pg-quality');
+  if(!hasData){ el.innerHTML='<h1 class="ph">Data <em>Quality</em></h1><div class="note">Load the dashboard on the Data Hub first.</div>'; return; }
+  const cl=filteredMeta().filter(isClient);
+  // 1. unmapped recurring revenue (fell to the Other bucket)
+  const unmapped=cl.map(m=>({m,other:(m.mrr.Other||0)})).filter(r=>r.other>0).sort((a,b)=>b.other-a.other);
+  const unmappedTot=unmapped.reduce((a,r)=>a+r.other,0);
+  // 2. clients with revenue but no sales owner
+  const noOwner=cl.map(m=>({m,mrr:totMRR(m)})).filter(r=>{const o=ownerOf(r.m.n);return (!o||o==='Unassigned')&&r.mrr>0;}).sort((a,b)=>b.mrr-a.mrr);
+  const noOwnerMo=noOwner.reduce((a,r)=>a+r.mrr,0);
+  // 3 & 4. Autotask sites that don't match a client
+  const X=mapIndex(), ix=PIPE.buildIndex(C);
+  const atUn=[];
+  if(window.SUPPORT&&Array.isArray(window.SUPPORT.clients)){
+    for(const row of window.SUPPORT.clients){ const r=_resolveSite(row.site,X,ix); if(r===null){ const w=winOf(row,'w12'); atUn.push({site:row.site,hours:w.hours,tickets:w.tickets}); } }
+    atUn.sort((a,b)=>b.hours-a.hours);
+  }
+  const devUn=[];
+  if(window.DEVICE_COUNTS){ for(const site of Object.keys(window.DEVICE_COUNTS)){ const r=_resolveSite(site,X,ix); if(r===null) devUn.push({site,dev:+window.DEVICE_COUNTS[site]||0}); } devUn.sort((a,b)=>b.dev-a.dev); }
+  const card=(k,v,s,hl)=>`<div class="card ${hl?'hl':''}"><div class="k">${k}</div><div class="v ${hl?'warn':''}">${v}</div><div class="s">${s}</div></div>`;
+  const tbl=(head,rows,empty)=>`<div class="twrap" style="max-height:360px"><table><thead><tr>${head}</tr></thead><tbody>${rows||('<tr><td colspan=9 class="hint">'+empty+'</td></tr>')}</tbody></table></div>`;
+  el.innerHTML=`
+  <h1 class="ph">Data <em>Quality</em></h1>
+  <p class="psub">Where the data doesn't map to something — fix these in the mapping control file so the figures and any AI layer stay trustworthy. Covers revenue with no service family, clients with no sales owner, and Autotask sites that don't match a client.</p>
+  <div class="cards">
+    ${card('Unmapped recurring','€'+Math.round(unmappedTot).toLocaleString()+'/mo',unmapped.length+' clients with "Other" revenue',unmappedTot>0)}
+    ${card('Clients without an owner',noOwner.length,'€'+Math.round(noOwnerMo).toLocaleString()+'/mo unassigned',noOwner.length>0)}
+    ${card('Autotask sites unmatched',atUn.length,'support not tied to a client',atUn.length>0)}
+    ${card('Device sites unmatched',devUn.length,devUn.reduce((a,r)=>a+r.dev,0).toLocaleString()+' devices',devUn.length>0)}
+  </div>
+  <div class="panel"><h3>Clients with revenue but no sales owner</h3><div class="hint">These carry MRR but resolve to "Unassigned". Assign an owner on the Owners tab of the mapping control file (or a group rule / override).</div>
+  ${tbl('<th>Client</th><th class="num">MRR/mo</th><th class="num">Annual</th>',
+    noOwner.slice(0,100).map(r=>`<tr><td class="clink" onclick="goClient('${jsq(r.m.n)}')">${esc(r.m.n)}</td><td class="num">${fmtE(r.mrr)}</td><td class="num">${fmtE(r.mrr*12)}</td></tr>`).join(''),'Every client with revenue has an owner.')}</div>
+  <div class="two">
+    <div class="panel"><h3>Unmapped revenue — "Other" family</h3><div class="hint">Recurring revenue the mapping couldn't place in a known service family. Classify the underlying NetSuite lines in the mapping control file.</div>
+    ${tbl('<th>Client</th><th class="num">Other MRR/mo</th>',
+      unmapped.slice(0,60).map(r=>`<tr><td class="clink" onclick="goClient('${jsq(r.m.n)}')">${esc(r.m.n)}</td><td class="num warn">${fmtE(r.other)}</td></tr>`).join(''),'No unmapped revenue.')}</div>
+    <div class="panel"><h3>Autotask sites not matched to a client</h3><div class="hint">Support/devices logged in Autotask under a name the dashboard can't tie to a billing client — add a name override or fix the client name map. Top by 12m hours, then devices.</div>
+    ${tbl('<th>Autotask site</th><th class="num">12m hrs</th><th class="num">Devices</th>',
+      (()=>{const dm={};devUn.forEach(d=>dm[d.site]=d.dev);const names=new Set([...atUn.map(a=>a.site),...devUn.map(d=>d.site)]);const rows=[...names].map(s=>{const a=atUn.find(x=>x.site===s);return {site:s,hours:a?a.hours:0,dev:dm[s]||0};}).sort((x,y)=>y.hours-x.hours||y.dev-x.dev);return rows.slice(0,80).map(r=>`<tr><td>${esc(r.site)}</td><td class="num">${r.hours?r.hours.toLocaleString():'—'}</td><td class="num">${r.dev||'—'}</td></tr>`).join('');})(),'Every Autotask site matches a client.')}</div>
+  </div>`;
+}
+
+const RENDER={multisite:renderMultiSite,action:renderAction,ownermap:renderOwnerMap,match:renderMatch,diag:renderDiag,exec:renderExec,radar:renderRadar,fin:renderFin,kpi:renderKpi,c360:renderC360,risk:renderRisk,ops:renderOps,quality:renderQuality,price:renderPrice,gap:renderGap,m365:renderM365,posture:renderPosture,cyber:renderCyber,nis2:renderNis2,win10:renderWin10,pkg:renderPkg,am:renderAm,health:renderHealth,churn:renderChurn,crm:renderCrm,pipeline:renderPipeline,leads:renderLeads,assign:renderAssign,recon:renderRecon,pending:renderPending,data:renderData};
 
 /* ================= CRM (Nimble) merge layer ================= */
 const AM_ROSTER={DF:'David Flood',DG:'David Groark',DMcD:'David McDonald',DOC:"Derek O'Callaghan",EB:'Emil Badea',EJ:'Eoghan Johnson',SC:'Simon Collins',MD:'Michael Daly',EG:'Eamon Gallagher'};
