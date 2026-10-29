@@ -989,7 +989,6 @@ const PAGES=[
  ['nis2','NIS2 Compliance','M6 2h8l2 3v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5z M8 9h4M8 12h4',0,'sub'],
  ['crm','CRM Overview','M10 3a4 4 0 100 8 4 4 0 000-8zM3 17a7 7 0 0114 0',6],
  ['assign','Lead Assignment','M7 9a3 3 0 100-6 3 3 0 000 6zM2 17a5 5 0 0110 0M15 11l2 2 3-3',6],
- ['pending','Pending Migration','M4 10h12M12 6l4 4-4 4',4],
  ['data','Data Hub','M10 3c3.9 0 7 1 7 2.5S13.9 8 10 8 3 7 3 5.5 6.1 3 10 3zM3 5.5v9c0 1.5 3.1 2.5 7 2.5s7-1 7-2.5v-9',4],
  ['action','Action Centre','M10 2a6 6 0 00-6 6c0 4-2 5-2 5h16s-2-1-2-5a6 6 0 00-6-6zM8 17a2 2 0 004 0',7],
  ['match','Client Matching','M4 7h8M4 11h5M14 4l3 3-3 3M4 15h12',4],
@@ -1215,9 +1214,15 @@ function renderKpi(){
 <script>
 /* ===== CLIENT 360 (with branch drill-down) ===== */
 function cpPill(k,t){const c=t==='Pro'?'pro':(t==='Basic'||t==='Essential')?'basic':'none';return `<span class="pill ${c}">${k}: ${t}</span>`;}
+let c360Sku='';
+window.setC360Sku=function(v){ c360Sku=v||''; if(state.page==='c360')renderC360(); };
 function renderC360(){
   const sorted=[...META].sort((a,b)=>totMRR(b)-totMRR(a));
-  if(!state.c360||!metaByC[state.c360])state.c360=sorted[0].n;
+  const SKUS=PIPE.SVC_ORDER.filter(s=>META.some(x=>x.mrr&&x.mrr[s]>0));
+  if(c360Sku&&!SKUS.includes(c360Sku)) c360Sku='';
+  const pickList=c360Sku?sorted.filter(x=>x.mrr&&x.mrr[c360Sku]>0):sorted;
+  if(!state.c360||!metaByC[state.c360])state.c360=(pickList[0]||sorted[0]).n;
+  if(c360Sku){ const cur=metaByC[state.c360]; if(!(cur&&cur.mrr&&cur.mrr[c360Sku]>0)&&pickList.length) state.c360=pickList[0].n; }
   const m=metaByC[state.c360],ci=cI[m.n],opps=clientOpps(m),oppV=opps.reduce((a,b)=>a+b.v,0);
   const sup=supportMRR(m),st=supportType(m),tgt=supportTarget(m),perDev=m.dev?sup/m.dev:0;
   const post=postureScore(m),brs=brByMaster[m.n]||[];
@@ -1226,13 +1231,12 @@ function renderC360(){
   document.getElementById('pg-c360').innerHTML=`
   <h1 class="ph">Client <em>360</em></h1>
   <div style="margin:8px 0 14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-    <div class="fdrop"><input type="text" id="cPick" value="${esc(m.n)}" autocomplete="off" style="width:340px;background:var(--panel);border:1px solid var(--line);color:#fff;border-radius:8px;padding:8px 12px"><div class="dd" id="cDD"></div></div>
-    <span class="tag">Owner: ${esc(ownerOf(m.n))}</span>${m.tier?`<span class="tag">M365: ${esc(m.tier)}</span>`:''}
-    ${brs.length?`<span class="tag">${brs.length} branches</span>`:''}
-    ${m.score!==undefined?`<span class="tag ${+m.score<.5?'gap':''}">Secure Score: ${Math.round(+m.score*100)}%</span>`:''}
-    ${m.cert&&!/^no|none/i.test(m.cert)?`<span class="tag g">Cert: ${esc(m.cert)}</span>`:''}
-    ${m.win10>0?`<span class="tag gap">Windows 10: ${m.win10}</span>`:''}
-    ${m.industry?`<span class="tag">${esc(m.industry)}</span>`:''}
+    <div class="fdrop"><input type="text" id="cPick" value="${esc(m.n)}" autocomplete="off" placeholder="Search clients…" style="width:340px;background:var(--panel);border:1px solid var(--line);color:#fff;border-radius:8px;padding:8px 12px"><div class="dd" id="cDD"></div></div>
+    <select id="cSku" onchange="setC360Sku(this.value)" style="background:var(--panel);border:1px solid var(--line);color:#fff;border-radius:8px;padding:8px 12px;max-width:260px">
+      <option value="">All solutions / SKUs</option>
+      ${SKUS.map(s=>`<option value="${esc(s)}"${c360Sku===s?' selected':''}>${esc(SVC_LABEL[s]||s)}</option>`).join('')}
+    </select>
+    ${c360Sku?`<span class="hint" style="margin:0">${pickList.length} client${pickList.length===1?'':'s'} hold ${esc(SVC_LABEL[c360Sku]||c360Sku)} — <span class="clink" onclick="setC360Sku('')">clear</span></span>`:''}
   </div>
   <div class="grid cards">
     <div class="card"><div class="k">MRR</div><div class="v">${fmtEk(totMRR(m))}</div><div class="s">annual-normalised</div></div>
@@ -1261,7 +1265,7 @@ function renderC360(){
   const pick=document.getElementById('cPick'),dd=document.getElementById('cDD');
   pick.addEventListener('focus',()=>pick.select());
   pick.addEventListener('input',()=>{const q=pick.value.toLowerCase();
-    dd.innerHTML=sorted.filter(x=>x.n.toLowerCase().includes(q)).slice(0,25).map(x=>`<div data-n="${esc(x.n)}">${esc(x.n)}<span style="float:right;color:var(--mut2)">${fmtEk(totMRR(x))}</span></div>`).join('');dd.style.display='block';});
+    dd.innerHTML=pickList.filter(x=>x.n.toLowerCase().includes(q)).slice(0,25).map(x=>`<div data-n="${esc(x.n)}">${esc(x.n)}<span style="float:right;color:var(--mut2)">${fmtEk(totMRR(x))}</span></div>`).join('');dd.style.display='block';});
   dd.addEventListener('mousedown',e=>{const d=e.target.closest('div[data-n]');if(d){state.c360=d.dataset.n;renderC360();}});
   const bySvc={},nr=new Float64Array(NM);
   for(const[c,mm,s,rc,a]of DATA.rows){if(c!==ci)continue;if(rc===0)(bySvc[s]=bySvc[s]||new Float64Array(NM))[mm]+=a;else nr[mm]+=a;}
@@ -1365,7 +1369,7 @@ function renderPrice(){
   <div class="twrap"><table><thead><tr><th>Client</th><th>Owner</th><th>Type</th><th class="num">Devices</th><th class="num">Support MRR</th><th class="num">€/device</th><th class="num">Target</th><th class="num">Uplift</th></tr></thead><tbody>
   ${rows.map(r=>`<tr><td class="clink" onclick="goClient('${jsq(r.m.n)}')">${esc(r.m.n)}</td><td>${esc(ownerOf(r.m.n))}</td><td>${r.t}</td><td class="num">${r.m.dev}</td><td class="num">${fmtE(r.v)}</td><td class="num ${r.pd<r.b?'warn':'pos'}">€${r.pd.toFixed(2)}</td><td class="num">€${r.b}</td><td class="num ${r.gap>25?'warn':'pos'}">${r.gap>0?'+':''}${fmtE(r.gap)}</td></tr>`).join('')}
   </tbody></table></div></div>
-  ${um.length?`<div class="note"><b>Device coverage.</b> ${um.length} sites carrying ${umDev.toLocaleString()} devices are not matched to a billing client. These are live clients still billing from the other ERP, so they carry no revenue here yet. They are listed on the Pending Migration page. Largest: ${um.slice(0,6).map(x=>esc(x[0])+' ('+x[1]+')').join(', ')}. <button class="btn ghost sm" style="margin-top:8px" onclick="go('pending')">See what is coming across</button></div>`:''}`;
+  ${um.length?`<div class="note"><b>Device coverage.</b> ${um.length} sites carrying ${umDev.toLocaleString()} devices are not matched to a billing client. These are live clients still billing from the other ERP, so they carry no revenue here yet. Largest: ${um.slice(0,6).map(x=>esc(x[0])+' ('+x[1]+')').join(', ')}.</div>`:''}`;
   const maxDev=Math.max(...rows.map(r=>r.m.dev),50);
   mkChart('chPrice',{type:'scatter',data:{datasets:[
     {label:'Managed IT',data:rows.filter(r=>r.t==='MIT').map(r=>({x:r.m.dev,y:r.pd,n:r.m.n})),backgroundColor:'rgba(0,160,216,.8)'},
@@ -1539,6 +1543,7 @@ function renderNis2(){
   document.getElementById('pg-nis2').innerHTML=`
   <h1 class="ph">NIS2 <em>Compliance</em></h1>
   <p class="psub">Technical readiness against the ten risk management measures in Article 21(2), inferred from the capabilities each client holds. Areas (a), (d) and (h) cover policy, supply chain and cryptography governance, so they are marked for attestation rather than scored from billing data. Treat this as a structured conversation starter for client reviews, not a legal assessment.</p>
+  <div style="margin:4px 0 14px"><a class="btn" href="https://it.ie/nis2-scope-compliance-assessment-tool/" target="_blank" rel="noopener">Check if a client is in scope →</a> <span class="hint" style="margin:0">Opens IT.ie's NIS2 scope &amp; compliance assessment tool in a new tab.</span></div>
   <div class="grid cards">
     <div class="card"><div class="k">Average technical readiness</div><div class="v ${avg<.5?'neg':avg<.75?'warn':'pos'}">${Math.round(avg*100)}%</div><div class="s">${metas.length} active clients</div></div>
     <div class="card"><div class="k">Largely ready</div><div class="v pos">${metas.filter(m=>nis2Pct(m)>=.8).length}</div><div class="s">80% or more of scored areas</div></div>
@@ -2353,7 +2358,9 @@ function pkgProposal(){
 }
 /* ===== ACCOUNT MANAGER SCORECARD ===== */
 function renderAm(){
-  const roster=META.filter(m=>isActive(m)||m.migrating);
+  let roster=META.filter(m=>isActive(m)||m.migrating);
+  if(state.owner) roster=roster.filter(m=>ownerOf(m.n)===state.owner);
+  if(state.sel&&state.sel.size) roster=roster.filter(m=>state.sel.has(cI[m.n]));
   const by={};
   roster.forEach(m=>{const o=ownerOf(m.n);(by[o]=by[o]||[]).push(m);});
   const rows=Object.entries(by).map(([o,ms])=>{
@@ -3146,7 +3153,7 @@ window.exportReconcile=function(){
   for(const s of unmatched.sort()) out.push(['autotask_unmatched','','','','',s,atSales[s]||'']);
   dl(out.map(r=>r.map(q).join(',')).join('\n'),'itie-name-reconciliation.csv','text/csv');
 };
-const RENDER={multisite:renderMultiSite,action:renderAction,ownermap:renderOwnerMap,match:renderMatch,diag:renderDiag,exec:renderExec,radar:renderRadar,fin:renderFin,kpi:renderKpi,c360:renderC360,risk:renderRisk,ops:renderOps,quality:renderQuality,price:renderPrice,gap:renderGap,m365:renderM365,posture:renderPosture,cyber:renderCyber,nis2:renderNis2,win10:renderWin10,pkg:renderPkg,am:renderAm,health:renderHealth,churn:renderChurn,crm:renderCrm,pipeline:renderPipeline,leads:renderLeads,assign:renderAssign,recon:renderRecon,pending:renderPending,data:renderData};
+const RENDER={multisite:renderMultiSite,action:renderAction,ownermap:renderOwnerMap,match:renderMatch,diag:renderDiag,exec:renderExec,radar:renderRadar,fin:renderFin,kpi:renderKpi,c360:renderC360,risk:renderRisk,ops:renderOps,quality:renderQuality,price:renderPrice,gap:renderGap,m365:renderM365,posture:renderPosture,cyber:renderCyber,nis2:renderNis2,win10:renderWin10,pkg:renderPkg,am:renderAm,health:renderHealth,churn:renderChurn,crm:renderCrm,pipeline:renderPipeline,leads:renderLeads,assign:renderAssign,recon:renderRecon,data:renderData};
 
 /* ================= CRM (Nimble) merge layer ================= */
 const AM_ROSTER={DF:'David Flood',DG:'David Groark',DMcD:'David McDonald',DOC:"Derek O'Callaghan",EB:'Emil Badea',EJ:'Eoghan Johnson',SC:'Simon Collins',MD:'Michael Daly',EG:'Eamon Gallagher'};
@@ -3300,7 +3307,17 @@ function renderSourceBadge(){
   } else {
     crm=`<div class="sb"><span class="dotc off"></span><span><b>CRM: not connected</b><small>owners come from NetSuite only</small></span></div>`;
   }
-  el.innerHTML=`<div class="sb"><span class="dotc on"></span><span><b>NetSuite: ${nsLabel}</b><small>${NC0} clients · to ${esc(DATA.maxDate||'')}</small></span></div>${crm}`;
+  let at;
+  const atLoaded=!!(window.DEVICE_COUNTS||window.SUPPORT||window.AT_OWNERS);
+  if(atLoaded){
+    const sites=window.DEVICE_COUNTS?Object.keys(window.DEVICE_COUNTS).length:0;
+    const owners=(window.AT_OWNERS&&Array.isArray(window.AT_OWNERS.owners))?window.AT_OWNERS.owners.filter(o=>o.salesOwner).length:0;
+    const when=(window.SUPPORT&&window.SUPPORT.generatedAt)?(' · '+new Date(window.SUPPORT.generatedAt).toLocaleDateString('en-IE')):'';
+    at=`<div class="sb"><span class="dotc on"></span><span><b>Autotask: connected</b><small>${sites} device sites · ${owners} sales-owned${when}</small></span></div>`;
+  } else {
+    at=`<div class="sb"><span class="dotc off"></span><span><b>Autotask: not loaded</b><small>devices, support &amp; owners</small></span></div>`;
+  }
+  el.innerHTML=`<div class="sb"><span class="dotc on"></span><span><b>NetSuite: ${nsLabel}</b><small>${NC0} clients · to ${esc(DATA.maxDate||'')}</small></span></div>${crm}${at}`;
 }
 
 
@@ -3563,10 +3580,12 @@ function churnFactors(m){
   score=Math.min(100,score);
   return { score, level: score>=50?'High':score>=25?'Medium':'Low', factors:f };
 }
+let churnBand='';   // '', 'High', 'Medium', 'Low'
+window.setChurnBand=function(b){ churnBand=(churnBand===b?'':b); if(state.page==='churn')renderChurn(); };
 function renderChurn(){
   const metas=filteredMeta().filter(isActive);
   const scored=metas.map(m=>({m,...churnFactors(m)})).sort((a,b)=>b.score-a.score);
-  const high=scored.filter(x=>x.level==='High'), med=scored.filter(x=>x.level==='Medium');
+  const high=scored.filter(x=>x.level==='High'), med=scored.filter(x=>x.level==='Medium'), low=scored.filter(x=>x.level==='Low');
   const mrrRisk=high.reduce((s,x)=>s+totMRR(x.m),0);
   const crmLive=scored.some(x=>{const a=crmAccountFor(x.m.n);return a&&a.lastContactDays!=null;});
   document.getElementById('pg-churn').innerHTML=`
@@ -3589,12 +3608,18 @@ function renderChurn(){
       <tr><td>No recent projects</td><td class="num">8</td><td>no one-off work in twelve months</td></tr>
     </tbody></table></div></div>
   </div>
-  <div class="panel"><h3>Clients to look at first</h3><div class="hint">Highest risk first, with the exact reasons. Click a client for the full picture.</div>
+  <div class="panel"><h3>Clients to look at first</h3><div class="hint">Click a band to filter the list, or a client for the full picture. Click the active band again to clear.</div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin:4px 0 12px">
+    <button class="btn ${churnBand==='High'?'':'ghost'} sm" onclick="setChurnBand('High')">High · ${high.length}</button>
+    <button class="btn ${churnBand==='Medium'?'':'ghost'} sm" onclick="setChurnBand('Medium')">Medium · ${med.length}</button>
+    <button class="btn ${churnBand==='Low'?'':'ghost'} sm" onclick="setChurnBand('Low')">Low · ${low.length}</button>
+    ${churnBand?`<span class="hint" style="margin:0;align-self:center">Showing <b>${churnBand}</b> risk — <span class="clink" onclick="setChurnBand('${churnBand}')">clear</span></span>`:'<span class="hint" style="margin:0;align-self:center">Showing High &amp; Medium</span>'}
+  </div>
   <div class="twrap" style="max-height:460px"><table><thead><tr><th>Client</th><th>Owner</th><th class="num">MRR</th><th class="num">Risk</th><th>Reasons</th></tr></thead><tbody>
-  ${scored.filter(x=>x.level!=='Low').slice(0,50).map(x=>`<tr><td class="clink" onclick="goClient('${jsq(x.m.n)}')">${esc(x.m.n)}</td><td>${esc(ownerOf(x.m.n))}</td><td class="num">${fmtE(totMRR(x.m))}</td><td class="num"><span class="${x.level==='High'?'neg':'warn'}"><b>${x.score}</b></span></td><td class="hint" style="margin:0">${x.factors.map(fc=>esc(fc[0])+' ('+fc[2]+')').join('; ')||'—'}</td></tr>`).join('')||'<tr><td colspan=5 class="hint">Nothing above low risk. The base looks stable on these signals.</td></tr>'}
+  ${(churnBand?scored.filter(x=>x.level===churnBand):scored.filter(x=>x.level!=='Low')).slice(0,200).map(x=>`<tr><td class="clink" onclick="goClient('${jsq(x.m.n)}')">${esc(x.m.n)}</td><td>${esc(ownerOf(x.m.n))}</td><td class="num">${fmtE(totMRR(x.m))}</td><td class="num"><span class="${x.level==='High'?'neg':x.level==='Medium'?'warn':'pos'}"><b>${x.score}</b></span></td><td class="hint" style="margin:0">${x.factors.map(fc=>esc(fc[0])+' ('+fc[2]+')').join('; ')||'—'}</td></tr>`).join('')||'<tr><td colspan=5 class="hint">No clients in this band.</td></tr>'}
   </tbody></table></div></div>`;
-  const buckets=[high.length,med.length,scored.length-high.length-med.length];
-  mkChart('chChurn',{type:'doughnut',data:{labels:['High','Medium','Low'],datasets:[{data:buckets,backgroundColor:['#e5484d','#f9c20d','#2fbf71']}]},options:{maintainAspectRatio:false,plugins:{legend:{position:'right'}}}});
+  const buckets=[high.length,med.length,low.length];
+  mkChart('chChurn',{type:'doughnut',data:{labels:['High','Medium','Low'],datasets:[{data:buckets,backgroundColor:['#e5484d','#f9c20d','#2fbf71']}]},options:{maintainAspectRatio:false,plugins:{legend:{position:'right'}},onClick:(e,els)=>{if(els&&els.length){const b=['High','Medium','Low'][els[0].index];setChurnBand(b);}}}});
 }
 let reconFilter='', reconUnassignedOnly=false;
 function mgrOptions(sel){ return '<option value="">— Unassigned —</option>'+Object.values(AM_ROSTER).map(m=>`<option value="${esc(m)}"${m===sel?' selected':''}>${esc(m)}</option>`).join(''); }
