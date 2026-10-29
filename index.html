@@ -991,8 +991,6 @@ const PAGES=[
  ['assign','Lead Assignment','M7 9a3 3 0 100-6 3 3 0 000 6zM2 17a5 5 0 0110 0M15 11l2 2 3-3',6],
  ['data','Data Hub','M10 3c3.9 0 7 1 7 2.5S13.9 8 10 8 3 7 3 5.5 6.1 3 10 3zM3 5.5v9c0 1.5 3.1 2.5 7 2.5s7-1 7-2.5v-9',4],
  ['action','Action Centre','M10 2a6 6 0 00-6 6c0 4-2 5-2 5h16s-2-1-2-5a6 6 0 00-6-6zM8 17a2 2 0 004 0',7],
- ['match','Client Matching','M4 7h8M4 11h5M14 4l3 3-3 3M4 15h12',4],
- ['ownermap','Owner Mapping','M4 5h12M4 10h12M4 15h12M2 5h.01M2 10h.01M2 15h.01',4],
  ['multisite','Multi-Site Clients','M3 5h6v6H3zM11 5h6v4h-6zM11 11h6v4h-6zM3 13h6v2H3z',4],
 ];
 const SECT={0:'',1:'Analysis',5:'Sales tools',2:'Drill-down',3:'Cyber posture',6:'CRM',4:'Coming across',7:'Action'};
@@ -2764,38 +2762,74 @@ function renderOwnerMap(){
       <div class="twrap" style="max-height:640px"><table><thead><tr><th>Owner ID · client</th><th>Manager (dropdown sets the ID) · contact-tag check</th></tr></thead><tbody>${body||'<tr><td colspan=2 class="hint">No active clients resolved to a Nimble owner ID yet.</td></tr>'}</tbody></table></div></div>`;
 }
 
+/* Build the per-client cross-stream picture used by the Action Centre. */
+function actBuild(){
+  const X=mapIndex(), ix=PIPE.buildIndex(C);
+  const atSalesBySite={}, atSites=new Set();
+  if(window.AT_OWNERS&&Array.isArray(window.AT_OWNERS.owners)) for(const r of window.AT_OWNERS.owners){ if(r.site){ atSites.add(r.site); atSalesBySite[r.site]=r.salesOwner||''; } }
+  if(window.SUPPORT&&Array.isArray(window.SUPPORT.clients)) for(const r of window.SUPPORT.clients){ if(r.site) atSites.add(r.site); }
+  if(window.DEVICE_COUNTS) for(const s of Object.keys(window.DEVICE_COUNTS)) atSites.add(s);
+  const atByClient={}, atOwnerBy={};
+  for(const s of atSites){ const c=_resolveSite(s,X,ix); if(c&&c!=='__skip__'){ (atByClient[c]=atByClient[c]||[]).push(s); if(atSalesBySite[s]&&!atOwnerBy[c]){ const o=canonAM(atSalesBySite[s]); if(SALES_SET.has(o)) atOwnerBy[c]=o; } } }
+  const nimBy={}, nimOwnerBy={}, feed=crmFeed();
+  if(feed) for(const a of (feed.accounts||[])){ const nm=a.name; let c=(cI[nm]!==undefined)?nm:(CRM_XWALK[nm]||X.nimbleToMapped[nm.toLowerCase()]||null); if(c&&cI[c]!==undefined){ if(!nimBy[c]) nimBy[c]=nm; const am=canonAM(accCls(a).am||''); if(am&&SALES_SET.has(am)&&!nimOwnerBy[c]) nimOwnerBy[c]=am; } }
+  return META.filter(m=>isClient(m)||m.migrating).map(m=>{
+    const c=m.n, nsO=canonAM(m.owner||''), nsOwner=SALES_SET.has(nsO)?nsO:'';
+    const at=atByClient[c]||[], nimble=nimBy[c]||'';
+    const streams=[...new Set([nsOwner,nimOwnerBy[c]||'',atOwnerBy[c]||''].filter(Boolean))];
+    return {c,m,at,nimble,nsOwner,nimbleOwner:nimOwnerBy[c]||'',atOwner:atOwnerBy[c]||'',owner:ownerOf(c),sot:SOT_OVR[c]||'netsuite',mism:streams.length>1,unmatched:(at.length===0)||(!!feed&&!nimble)};
+  }).sort((a,b)=>{ const ua=a.owner==='Unassigned',ub=b.owner==='Unassigned'; if(ua!==ub)return ua?-1:1; return a.c.localeCompare(b.c); });
+}
+let actModeVal='all';
+function setActMode(m){ actModeVal=m; if(state.page==='action')renderAction(); }
+function actFilterRows(qq){ qq=(qq||'').toLowerCase(); document.querySelectorAll('#actTable tbody tr').forEach(tr=>{ const n=tr.getAttribute('data-n')||''; tr.style.display=(!qq||n.indexOf(qq)>=0)?'':'none'; }); }
+function actReport(){
+  const flagged=actBuild().filter(r=>r.mism||r.unmatched||r.owner==='Unassigned');
+  const q=v=>{v=(v==null?'':String(v));return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
+  const out=[['client','resolved_owner','netsuite_owner','nimble_owner','autotask_owner','source_of_truth','autotask_name','nimble_name','status']];
+  flagged.forEach(r=>out.push([r.c,r.owner,r.nsOwner,r.nimbleOwner,r.atOwner,r.sot,r.at.join('; '),r.nimble,r.mism?'owner mismatch':(r.owner==='Unassigned'?'unassigned':'unmatched name')]));
+  dl(out.map(x=>x.map(q).join(',')).join('\n'),'itie-ownership-mismatch.csv','text/csv');
+}
 function renderAction(){
   const el=document.getElementById('pg-action');
-  if(!hasData){ el.innerHTML='<h1 class="ph">Action <em>Centre</em></h1><div class="note">Load NetSuite, and Nimble for ownership, from the Data Hub. This page then shows exactly what needs your attention.</div>'; return; }
+  if(!hasData){ el.innerHTML='<h1 class="ph">Action <em>Centre</em></h1><div class="note">Load NetSuite (and Nimble / Autotask) from the Data Hub first.</div>'; return; }
   try{ if(crmFeed()) mergeCRM(); }catch(e){}
-  const unassigned=[]; for(let i=0;i<NC0;i++){ const m=META[i]; if(!isClient(m))continue; const o=ownerOf(m.n); if(!o||o==='Unassigned') unassigned.push(m); }
-  unassigned.sort((a,b)=>totMRR(b)-totMRR(a));
-  const review=(CRM&&CRM.review)?CRM.review.length:0;
-  let dvb=[];
-  try{ dvb=filteredMeta().filter(m=>m.dev>0&&supportType(m)).map(m=>{const v=supportMRR(m),t=supportType(m),b=supportTarget(m);return {m,t,v,b,gap:(b*m.dev)-v,pd:m.dev?v/m.dev:0};}).filter(r=>r.gap>=25).sort((a,b)=>b.gap-a.gap); }catch(e){}
-  const dvbTotal=dvb.reduce((a,r)=>a+r.gap,0);
-  const devLoaded=!!window.DEVICE_COUNTS;
-  let uncl=0; try{ uncl=filteredMeta().filter(m=>Object.keys(m.mrr||{}).some(k=>/other|unmapped/i.test(k))).length; }catch(e){}
+  const all=actBuild(), mode=actModeVal;
+  const rows=all.filter(r=> mode==='unassigned'?r.owner==='Unassigned' : mode==='unmatched'?r.unmatched : mode==='mismatch'?r.mism : true);
+  const nUn=all.filter(r=>r.owner==='Unassigned').length, nUm=all.filter(r=>r.unmatched).length, nMm=all.filter(r=>r.mism).length;
+  const amOpts=o=>`<option value=""${(!o||o==='Unassigned')?' selected':''}>— Unassigned —</option>`+[...SALES_SET].sort().map(x=>`<option${x===o?' selected':''}>${esc(x)}</option>`).join('');
+  const sotOpts=s=>['netsuite','autotask','nimble'].map(v=>`<option value="${v}"${v===(s||'netsuite')?' selected':''}>${v==='netsuite'?'NetSuite':v==='autotask'?'Autotask':'Nimble'}</option>`).join('');
+  const mbtn=(m,l,n)=>`<button class="btn ${mode===m?'':'ghost'} sm" onclick="setActMode('${m}')">${l} · ${n}</button>`;
+  const sstyle='background:var(--panel);border:1px solid var(--line);color:#fff;border-radius:6px;padding:5px 7px;font-size:12px';
+  const istyle='width:150px;background:var(--navy2);border:1px solid var(--line);color:#fff;border-radius:6px;padding:4px 7px;font-size:12px';
   el.innerHTML=`<h1 class="ph">Action <em>Centre</em></h1>
-  <p class="psub">Your home base: what needs attention and where to fix it. Clear these and the dashboard is clean, owned and current.</p>
-  <div class="grid cards">
-    <div class="card ${unassigned.length?'hl':''}"><div class="k">Clients without an owner</div><div class="v ${unassigned.length?'neg':''}">${unassigned.length}</div><div class="s">assign on Owner Mapping</div></div>
-    <div class="card ${review?'hl':''}"><div class="k">Names to confirm</div><div class="v ${review?'warn':''}">${review}</div><div class="s">Client Matching</div></div>
-    <div class="card ${dvb.length?'hl':''}"><div class="k">Under-billed vs devices</div><div class="v ${dvb.length?'neg':''}">${devLoaded?fmtE(dvbTotal):'—'}</div><div class="s">${devLoaded?dvb.length+' clients, monthly upside':'load Site device count'}</div></div>
-    <div class="card"><div class="k">Unclassified revenue</div><div class="v ${uncl?'warn':''}">${uncl}</div><div class="s">refresh mapping if high</div></div>
+  <p class="psub">One place to reconcile identity and ownership across the three systems. Set each client's source of truth, link any name a stream can't match (e.g. DSPCA → NSPCA after a rename), and assign the account manager. Every change saves ${CENTRAL_META.synced?'centrally for the team':'<b>locally only (central store not connected)</b>'}. Run the mismatch report monthly to catch where the streams drift apart.</p>
+  <div class="cards">
+    <div class="card ${nUn?'hl':''}"><div class="k">Unassigned</div><div class="v ${nUn?'neg':''}">${nUn}</div><div class="s">no account manager</div></div>
+    <div class="card ${nUm?'hl':''}"><div class="k">Unmatched names</div><div class="v ${nUm?'warn':''}">${nUm}</div><div class="s">a stream can't be tied</div></div>
+    <div class="card ${nMm?'hl':''}"><div class="k">Owner mismatches</div><div class="v ${nMm?'warn':''}">${nMm}</div><div class="s">streams disagree</div></div>
+    <div class="card"><div class="k">Clients</div><div class="v">${all.length}</div><div class="s">total</div></div>
   </div>
-  <div class="two">
-    <div class="panel"><h3>Clients to assign an owner</h3><div class="hint">Highest revenue first. Fix in bulk on Owner Mapping (by Nimble owner ID) or one at a time on Reconciliation. Saved centrally for everyone.</div>
-    <div class="twrap" style="max-height:360px"><table><thead><tr><th>Client</th><th class="num">MRR</th></tr></thead><tbody>
-    ${unassigned.slice(0,30).map(m=>`<tr><td class="clink" onclick="goClient('${jsq(m.n)}')">${esc(m.n)}</td><td class="num">${fmtE(totMRR(m))}</td></tr>`).join('')||'<tr><td colspan=2 class="hint">Everyone has an owner. Nicely done.</td></tr>'}
-    </tbody></table></div>
-    <div style="margin-top:10px;display:flex;gap:8px"><button class="btn" onclick="go('ownermap')">Owner Mapping</button></div></div>
-    <div class="panel"><h3>Billing below devices held</h3><div class="hint">Clients whose managed-IT billing is materially under the devices Autotask reports, so likely revenue on the table. Needs the Site device count loaded on the Data Hub.</div>
-    <div class="twrap" style="max-height:360px"><table><thead><tr><th>Client</th><th class="num">Devices</th><th class="num">€/dev</th><th class="num">Gap/mo</th></tr></thead><tbody>
-    ${devLoaded?(dvb.slice(0,30).map(r=>`<tr><td class="clink" onclick="goClient('${jsq(r.m.n)}')">${esc(r.m.n)}</td><td class="num">${r.m.dev}</td><td class="num">€${r.pd.toFixed(0)}</td><td class="num neg">+${fmtE(r.gap)}</td></tr>`).join('')||'<tr><td colspan=4 class="hint">No material gaps found.</td></tr>'):'<tr><td colspan=4 class="hint">Load the Site device count CSV to see this.</td></tr>'}
-    </tbody></table></div>
-    <div style="margin-top:10px"><button class="btn" onclick="go('match')">Client Matching</button></div></div>
-  </div>`;
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0 14px">
+    ${mbtn('all','All',all.length)}${mbtn('unassigned','Unassigned',nUn)}${mbtn('unmatched','Unmatched',nUm)}${mbtn('mismatch','Mismatches',nMm)}
+    <input id="actSearch" placeholder="Search clients…" oninput="actFilterRows(this.value)" style="width:260px;${sstyle};padding:8px 11px">
+    <button class="btn ghost sm" onclick="actReport()">Download mismatch report</button>
+  </div>
+  <div class="panel"><div class="twrap" style="max-height:620px"><table id="actTable"><thead><tr>
+    <th>Client</th><th>Autotask</th><th>NetSuite</th><th>Nimble</th><th>Source of truth</th><th>Account manager</th><th>Status</th></tr></thead><tbody>
+  ${rows.map((r,i)=>{
+    const atCell=r.at.length?esc(r.at.join(', ')):`<span style="display:flex;gap:4px"><input id="atm${i}" placeholder="link Autotask name" style="${istyle}"><button class="btn ghost sm" onclick="actMapName('atm${i}','${jsq(r.c)}')">map</button></span>`;
+    const nimCell=!crmFeed()?'<span class="hint" style="margin:0">—</span>':(r.nimble?esc(r.nimble):`<span style="display:flex;gap:4px"><input id="nbm${i}" placeholder="link Nimble name" style="${istyle}"><button class="btn ghost sm" onclick="actMapName('nbm${i}','${jsq(r.c)}')">map</button></span>`);
+    return `<tr data-n="${esc(r.c.toLowerCase())}">
+      <td class="clink" onclick="goClient('${jsq(r.c)}')">${esc(r.c)}${r.mism?` <span class="tag r" title="NetSuite ${esc(r.nsOwner||'—')} · Nimble ${esc(r.nimbleOwner||'—')} · Autotask ${esc(r.atOwner||'—')}">!</span>`:''}</td>
+      <td>${atCell}</td>
+      <td>${esc(r.c)}</td>
+      <td>${nimCell}</td>
+      <td><select onchange="setSot('${jsq(r.c)}',this.value)" style="${sstyle}">${sotOpts(r.sot)}</select></td>
+      <td><select onchange="actSetOwner('${jsq(r.c)}',this.value)" style="${sstyle}${r.owner==='Unassigned'?';border-color:#e5484d':''}">${amOpts(r.owner)}</select></td>
+      <td>${r.mism?'<span class="warn">mismatch</span>':r.unmatched?'<span class="hint" style="margin:0">unmatched</span>':'<span class="pos">ok</span>'}</td>
+    </tr>`;}).join('')}
+  </tbody></table></div></div>`;
 }
 
 function rebuildFromCache(){
@@ -2925,6 +2959,7 @@ function atOwnerByClient(){
     if(/^it\.?\s*ie$/i.test(site)) continue;
     let comp=null;
     if(NAME_OVR[site]&&cI[NAME_OVR[site]]!==undefined) comp=NAME_OVR[site];
+    if(!comp&&CRM_XWALK[site]&&cI[CRM_XWALK[site]]!==undefined) comp=CRM_XWALK[site];
     if(!comp&&cI[site]!==undefined) comp=site;
     if(!comp){ const mp=X.atToMapped[site.toLowerCase()]; if(mp&&cI[mp]!==undefined) comp=mp; }
     if(!comp){ const m=P.matchSite(site,ix); if(m.name&&m.score>=0.999&&!P.blocked(site,m.name)) comp=m.name; }
@@ -3049,6 +3084,7 @@ function renderOps(){
 function _resolveSite(site,X,ix){
   if(!site||/^it\.?\s*ie$/i.test(site)) return '__skip__';
   if(NAME_OVR[site]&&cI[NAME_OVR[site]]!==undefined) return NAME_OVR[site];
+  if(CRM_XWALK[site]&&cI[CRM_XWALK[site]]!==undefined) return CRM_XWALK[site];
   if(cI[site]!==undefined) return site;
   const mp=X.atToMapped[site.toLowerCase()]; if(mp&&cI[mp]!==undefined) return mp;
   const m=PIPE.matchSite(site,ix); if(m.name&&m.score>=0.999&&!PIPE.blocked(site,m.name)) return m.name;
@@ -3170,6 +3206,10 @@ function crmStatusOf(active,hasRevenue){ if(active) return hasRevenue?'billing':
 let CRM_XWALK={}, CRM_OVR={}, CRM=null;
 try{ const a=localStorage.getItem('itie3_crm_xwalk'); if(a)CRM_XWALK=JSON.parse(a); }catch(e){}
 try{ const a=localStorage.getItem('itie3_crm_ovr'); if(a)CRM_OVR=JSON.parse(a); }catch(e){}
+let SOT_OVR={}; try{ const a=localStorage.getItem('itie3_sot'); if(a)SOT_OVR=JSON.parse(a); }catch(e){}
+function setSot(client,v){ if(v)SOT_OVR[client]=v; else delete SOT_OVR[client]; try{localStorage.setItem('itie3_sot',JSON.stringify(SOT_OVR));}catch(e){} pushOverride({sourceOfTruth:{[client]:v||null}}); if(state.page==='action')renderAction(); }
+function actSetOwner(client,owner){ crmSetOwner(client,owner); }
+function actMapName(inputId,client){ const el=document.getElementById(inputId); if(!el)return; const v=(el.value||'').trim(); if(!v)return; crmAssign(v,client); if(state.page==='action')renderAction(); }
 function saveXwalk(){ try{localStorage.setItem('itie3_crm_xwalk',JSON.stringify(CRM_XWALK));}catch(e){} }
 function saveCrmOvr(){ try{localStorage.setItem('itie3_crm_ovr',JSON.stringify(CRM_OVR));}catch(e){} }
 
@@ -3188,6 +3228,7 @@ async function loadCentralOverrides(){
     Object.assign(CLIENT_RENAME, d.clientRenames||{});
     if(d.clientRenames&&d.clientRenames['__matchNotes__']!=null){ window.__matchNotes=d.clientRenames['__matchNotes__']; }
     Object.assign(OWNER_ID_MAP_OVR, d.ownerIdMap||{});
+    Object.assign(SOT_OVR, d.sourceOfTruth||{});
     CENTRAL_META={updatedAt:d.updatedAt||null,updatedBy:d.updatedBy||null,synced:true};
     try{ localStorage.setItem('itie3_owner',JSON.stringify(OWNER_OVR));
          localStorage.setItem('itie3_crm_xwalk',JSON.stringify(CRM_XWALK));
