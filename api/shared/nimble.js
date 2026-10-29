@@ -47,24 +47,27 @@ function normDeal(d){
 async function fetchDeals(token,perPage,maxPages){
   perPage=perPage||50; maxPages=maxPages||200;
   const byId={}; let count=0, raw=0, page=1, pages=1;
-  const dbg={status:null,topKeys:null,listKey:null,listLen:null,firstKeys:null,firstStatus:null,firstContactIds:null};
+  const dbg={status:null,topKeys:null,listKey:null,listLen:null,metaKeys:null,firstKeys:null,firstStatus:null,firstContactIds:null};
+  // Current Nimble Deals API is v2 on app.nimble.com, authed with X-Nimble-Token.
+  // Send both auth styles so a Bearer-style token also works if that's what we hold.
+  const hdr={ 'X-Nimble-Token':token, 'Authorization':`Bearer ${token}`, 'Accept':'application/json' };
   try{
     do{
-      const url=`${NIMBLE_BASE}/deals?per_page=${perPage}&page=${page}`;
-      const res=await fetch(url,{headers:{Authorization:`Bearer ${token}`}});
+      const url=`https://app.nimble.com/api/v2/deals?per_page=${perPage}&page=${page}`;
+      const res=await fetch(url,{headers:hdr});
       if(page===1) dbg.status=res.status;
       if(!res.ok){ const b=await res.text().catch(()=> ''); return { byId, count, raw, error:`deals ${res.status}: ${b.slice(0,160)}`, dbg }; }
       const data=await res.json();
       let list=data.resources, lk='resources';
-      if(!Array.isArray(list)){ if(Array.isArray(data.deals)){list=data.deals;lk='deals';} else if(Array.isArray(data.results)){list=data.results;lk='results';} else if(Array.isArray(data)){list=data;lk='(array)';} else {list=[];lk='(none)';} }
-      if(page===1){ dbg.topKeys=Object.keys(data||{}).slice(0,25); dbg.listKey=lk; dbg.listLen=list.length; if(list[0]){ dbg.firstKeys=Object.keys(list[0]).slice(0,50); dbg.firstStatus=dealStatus(list[0]); dbg.firstContactIds=dealContactIds(list[0]).slice(0,8); } }
+      if(!Array.isArray(list)){ if(Array.isArray(data.deals)){list=data.deals;lk='deals';} else if(Array.isArray(data.data)){list=data.data;lk='data';} else if(Array.isArray(data.results)){list=data.results;lk='results';} else if(Array.isArray(data)){list=data;lk='(array)';} else {list=[];lk='(none)';} }
+      if(page===1){ dbg.topKeys=Object.keys(data||{}).slice(0,25); dbg.listKey=lk; dbg.listLen=list.length; if(data&&data.meta&&typeof data.meta==='object')dbg.metaKeys=Object.keys(data.meta).slice(0,15); if(list[0]){ dbg.firstKeys=Object.keys(list[0]).slice(0,50); dbg.firstStatus=dealStatus(list[0]); dbg.firstContactIds=dealContactIds(list[0]).slice(0,8); } }
       for(const d of list){
         raw++;
         const st=dealStatus(d); if(st==='won'||st==='lost'||st==='closed') continue;
         const nd=normDeal(d); count++;
         for(const cid of dealContactIds(d)){ (byId[cid]=byId[cid]||[]).push(nd); }
       }
-      pages=(data.meta&&(data.meta.pages||data.meta.total_pages))||pages; page++;
+      pages=(data.meta&&(data.meta.pages||data.meta.total_pages||data.meta.page_count))||pages; page++;
     }while(page<=pages&&page<=maxPages);
   }catch(e){ return { byId, count, raw, error:String(e&&e.message||e), dbg }; }
   return { byId, count, raw, error:null, dbg };
