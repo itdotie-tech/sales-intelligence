@@ -3070,6 +3070,7 @@ function renderQuality(){
   el.innerHTML=`
   <h1 class="ph">Data <em>Quality</em></h1>
   <p class="psub">Where the data doesn't map to something — fix these in the mapping control file so the figures and any AI layer stay trustworthy. Owner coverage counts only clients with incoming revenue in the last 12 months; non-revenue accounts (vendors, one-off jobs, churned) are excluded. Only sales-team names are used as owners — anything else is Unassigned.</p>
+  <div style="margin:6px 0 14px"><button class="btn" onclick="exportReconcile()">Download name reconciliation (names only)</button> <span class="hint" style="margin:0">Client names, Autotask site names and owner — no revenue figures. Send this to reconcile naming and fix the unassigned.</span></div>
   <div class="cards">
     ${card('Clients without an owner',noOwner.length,'€'+Math.round(noOwnerRev).toLocaleString()+' 12m revenue unassigned',noOwner.length>0)}
     ${card('Lapsing (no revenue in 6m)',lapsing.length,'billed in 12m, nothing in last 6m',lapsing.length>0)}
@@ -3097,6 +3098,30 @@ function renderQuality(){
   </div>`;
 }
 
+/* Names-only reconciliation export: client names, Autotask site names, owner and
+   a Yes/No revenue flag — no euro figures, no credentials. For fixing the crosswalk. */
+window.exportReconcile=function(){
+  if(!hasData){ return; }
+  const X=mapIndex(), ix=PIPE.buildIndex(C);
+  const atSales={};
+  if(window.AT_OWNERS&&Array.isArray(window.AT_OWNERS.owners)) for(const r of window.AT_OWNERS.owners){ if(r.site) atSales[r.site]=r.salesOwner||''; }
+  const sites=new Set();
+  if(window.AT_OWNERS&&Array.isArray(window.AT_OWNERS.owners)) window.AT_OWNERS.owners.forEach(r=>r.site&&sites.add(r.site));
+  if(window.SUPPORT&&Array.isArray(window.SUPPORT.clients)) window.SUPPORT.clients.forEach(r=>r.site&&sites.add(r.site));
+  if(window.DEVICE_COUNTS) Object.keys(window.DEVICE_COUNTS).forEach(s=>sites.add(s));
+  const matchedBy={},unmatched=[];
+  for(const s of sites){ const r=_resolveSite(s,X,ix); if(r===null) unmatched.push(s); else if(r!=='__skip__'){ (matchedBy[r]=matchedBy[r]||[]).push(s); } }
+  const srcOf=n=>{ if(OWNER_OVR[n])return'override'; if(groupOwner(n))return'rule'; const canon=x=>(typeof canonAM==='function')?canonAM(x):x; const a=(typeof atSalesOwnerOf==='function')?atSalesOwnerOf(n):null; if(a&&SALES_SET.has(canon(a)))return'autotask'; const m=metaByC[n]; if(m&&SALES_SET.has(canon((m.ownerFinal||m.owner)||'')))return'crm'; return'unassigned'; };
+  const q=v=>{ v=(v==null?'':String(v)); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
+  const out=[['type','netsuite_client','owner','owner_source','revenue_12m','autotask_site','autotask_sales_owner']];
+  for(const m of filteredMeta().filter(isClient)){
+    const n=m.n, rev=((m.ttmR||0)+(m.ttmN||0))>0?'Yes':'No', sl=matchedBy[n]||[];
+    if(sl.length) sl.forEach(s=>out.push(['client',n,ownerOf(n),srcOf(n),rev,s,atSales[s]||'']));
+    else out.push(['client',n,ownerOf(n),srcOf(n),rev,'','']);
+  }
+  for(const s of unmatched.sort()) out.push(['autotask_unmatched','','','','',s,atSales[s]||'']);
+  dl(out.map(r=>r.map(q).join(',')).join('\n'),'itie-name-reconciliation.csv','text/csv');
+};
 const RENDER={multisite:renderMultiSite,action:renderAction,ownermap:renderOwnerMap,match:renderMatch,diag:renderDiag,exec:renderExec,radar:renderRadar,fin:renderFin,kpi:renderKpi,c360:renderC360,risk:renderRisk,ops:renderOps,quality:renderQuality,price:renderPrice,gap:renderGap,m365:renderM365,posture:renderPosture,cyber:renderCyber,nis2:renderNis2,win10:renderWin10,pkg:renderPkg,am:renderAm,health:renderHealth,churn:renderChurn,crm:renderCrm,pipeline:renderPipeline,leads:renderLeads,assign:renderAssign,recon:renderRecon,pending:renderPending,data:renderData};
 
 /* ================= CRM (Nimble) merge layer ================= */
