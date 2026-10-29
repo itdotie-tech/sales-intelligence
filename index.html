@@ -838,8 +838,20 @@ function groupOwner(n){ if(!n)return ''; for(const [re,who] of GROUP_RULES){ if(
 /* Sales account manager for a client. Rules → Autotask sales owner → CRM/NetSuite
    owner, but only ever a sales-team name; otherwise Unassigned. Technical owners
    are never used. A manual override is respected as entered. */
+/* Confirmed manual/alias owner assignments (client name -> sales owner), where the
+   NetSuite name differs from Autotask or there's no Autotask account. Reviewed with
+   IT.ie, Oct 2026. A user override (OWNER_OVR) still wins over these. */
+const BUILTIN_OWNER={
+  'Advance Labels Ltd':'Eoghan Johnson',
+  'Keenan Lynch Architects':"Derek O'Callaghan",
+  'Abacus - Abacus Property Management':'Emil Badea',
+  'Fastnet Capital Malta':'David Flood',
+  'Qualitas Property Partners Ltd':'David Flood',
+  'Nineyards Ltd':'David Groark'
+};
 function ownerOf(n){
   if(OWNER_OVR[n]) return OWNER_OVR[n];
+  if(BUILTIN_OWNER[n]) return BUILTIN_OWNER[n];
   const g=groupOwner(n); if(g) return g;
   const canon=x=>(typeof canonAM==='function')?canonAM(x):x;
   const a=(typeof atSalesOwnerOf==='function')?atSalesOwnerOf(n):null; const ca=canon(a); if(ca&&SALES_SET.has(ca)) return ca;
@@ -3042,11 +3054,20 @@ function renderQuality(){
   const inc12=m=>(m.ttmR||0)+(m.ttmN||0);          // incoming revenue, last 12 months
   const inc6=m=>(m.ttm6||0);                         // incoming revenue, last 6 months
   const active=cl.filter(m=>inc12(m)>0);             // only revenue-generating clients count
+  const X=mapIndex(), ix=PIPE.buildIndex(C);
+  // Autotask device presence = the authority for "managed client" vs vendor/partner.
+  // A client that resolves to a site in the device feed is a real managed client;
+  // one with revenue but no Autotask device site is treated as a probable non-client.
+  const devClients=new Set();
+  if(window.DEVICE_COUNTS) for(const s of Object.keys(window.DEVICE_COUNTS)){ const r=_resolveSite(s,X,ix); if(r&&r!=='__skip__') devClients.add(r); }
+  const isManaged=m=>devClients.has(m.n);
   // 1. unmapped recurring revenue (fell to the Other bucket)
   const unmapped=cl.map(m=>({m,other:(m.mrr.Other||0)})).filter(r=>r.other>0).sort((a,b)=>b.other-a.other);
   const unmappedTot=unmapped.reduce((a,r)=>a+r.other,0);
-  // 2. revenue-generating clients with no sales owner
-  const noOwner=active.map(m=>({m,rev:inc12(m)})).filter(r=>{const o=ownerOf(r.m.n);return !o||o==='Unassigned';}).sort((a,b)=>b.rev-a.rev);
+  // 2. revenue-generating clients with no sales owner — split by Autotask device presence
+  const noOwnerAll=active.map(m=>({m,rev:inc12(m),managed:isManaged(m)})).filter(r=>{const o=ownerOf(r.m.n);return !o||o==='Unassigned';}).sort((a,b)=>b.rev-a.rev);
+  const noOwner=noOwnerAll.filter(r=>r.managed);          // genuine managed clients needing an owner
+  const nonClient=noOwnerAll.filter(r=>!r.managed);        // revenue but no Autotask device = likely vendor/partner
   const noOwnerRev=noOwner.reduce((a,r)=>a+r.rev,0);
   // lapsing: had revenue in last 12m but none in last 6m
   const lapsing=active.filter(m=>inc6(m)<=0).map(m=>({m,rev:inc12(m),owner:ownerOf(m.n)})).sort((a,b)=>b.rev-a.rev);
@@ -3058,7 +3079,6 @@ function renderQuality(){
     return {label,who,members,rev:members.reduce((a,x)=>a+x.rev,0)};
   }).filter(g=>g.members.length);
   // 3 & 4. Autotask sites that don't match a client
-  const X=mapIndex(), ix=PIPE.buildIndex(C);
   const atUn=[];
   if(window.SUPPORT&&Array.isArray(window.SUPPORT.clients)){
     for(const row of window.SUPPORT.clients){ const r=_resolveSite(row.site,X,ix); if(r===null){ const w=winOf(row,'w12'); atUn.push({site:row.site,hours:w.hours,tickets:w.tickets}); } }
@@ -3070,18 +3090,21 @@ function renderQuality(){
   const tbl=(head,rows,empty)=>`<div class="twrap" style="max-height:360px"><table><thead><tr>${head}</tr></thead><tbody>${rows||('<tr><td colspan=9 class="hint">'+empty+'</td></tr>')}</tbody></table></div>`;
   el.innerHTML=`
   <h1 class="ph">Data <em>Quality</em></h1>
-  <p class="psub">Where the data doesn't map to something — fix these in the mapping control file so the figures and any AI layer stay trustworthy. Owner coverage counts only clients with incoming revenue in the last 12 months; non-revenue accounts (vendors, one-off jobs, churned) are excluded. Only sales-team names are used as owners — anything else is Unassigned.</p>
+  <p class="psub">Where the data doesn't map to something — fix these in the mapping control file so the figures and any AI layer stay trustworthy. A <b>managed client</b> is one with an Autotask device site (from the live device feed — the authority for client vs vendor). Owner coverage counts only managed clients with incoming revenue in the last 12 months; revenue accounts with no Autotask devices are treated as likely vendors/partners and listed separately. Only sales-team names are used as owners — anything else is Unassigned.</p>
   <div style="margin:6px 0 14px"><button class="btn" onclick="exportReconcile()">Download name reconciliation (names only)</button> <span class="hint" style="margin:0">Client names, Autotask site names and owner — no revenue figures. Send this to reconcile naming and fix the unassigned.</span></div>
   <div class="cards">
-    ${card('Clients without an owner',noOwner.length,'€'+Math.round(noOwnerRev).toLocaleString()+' 12m revenue unassigned',noOwner.length>0)}
+    ${card('Managed clients without an owner',noOwner.length,'€'+Math.round(noOwnerRev).toLocaleString()+' 12m revenue unassigned',noOwner.length>0)}
+    ${card('Revenue, no Autotask devices',nonClient.length,'likely vendors/partners — review',nonClient.length>0)}
     ${card('Lapsing (no revenue in 6m)',lapsing.length,'billed in 12m, nothing in last 6m',lapsing.length>0)}
     ${card('Unmapped recurring','€'+Math.round(unmappedTot).toLocaleString()+'/mo',unmapped.length+' clients with "Other" revenue',unmappedTot>0)}
     ${card('Autotask sites unmatched',atUn.length,'support not tied to a client',atUn.length>0)}
-    ${card('Device sites unmatched',devUn.length,devUn.reduce((a,r)=>a+r.dev,0).toLocaleString()+' devices',devUn.length>0)}
   </div>
-  <div class="panel"><h3>Revenue-generating clients with no sales owner</h3><div class="hint">Billed in the last 12 months but resolve to "Unassigned" (no sales-team owner from Autotask, a group rule or an override). Assign on the Owners tab of the mapping control file. Sorted by 12-month revenue.</div>
+  <div class="panel"><h3>Managed clients with no sales owner</h3><div class="hint">Have an Autotask device site (so they're real managed clients) and revenue in the last 12 months, but resolve to "Unassigned". These are the genuine owner gaps — assign in Autotask or via an override. Sorted by 12-month revenue.</div>
   ${tbl('<th>Client</th><th class="num">12m revenue</th><th class="num">MRR/mo now</th>',
-    noOwner.slice(0,120).map(r=>`<tr><td class="clink" onclick="goClient('${jsq(r.m.n)}')">${esc(r.m.n)}</td><td class="num">${fmtE(r.rev)}</td><td class="num">${fmtE(totMRR(r.m))}</td></tr>`).join(''),'Every revenue-generating client has a sales owner.')}</div>
+    noOwner.slice(0,120).map(r=>`<tr><td class="clink" onclick="goClient('${jsq(r.m.n)}')">${esc(r.m.n)}</td><td class="num">${fmtE(r.rev)}</td><td class="num">${fmtE(totMRR(r.m))}</td></tr>`).join(''),'Every managed client has a sales owner.')}</div>
+  <div class="panel"><h3>Revenue but no Autotask devices — likely vendors / partners</h3><div class="hint">Billed in NetSuite but with no device site in Autotask, so by the device-feed rule these aren't managed clients. Review: a genuine client missing from Autotask, or a supplier/partner/one-off to exclude. Not counted as unassigned clients.</div>
+  ${tbl('<th>Account</th><th class="num">12m revenue</th>',
+    nonClient.slice(0,150).map(r=>`<tr><td class="clink" onclick="goClient('${jsq(r.m.n)}')">${esc(r.m.n)}</td><td class="num">${fmtE(r.rev)}</td></tr>`).join(''),'None.')}</div>
   <div class="panel"><h3>Lapsing clients — revenue in 12m but none in the last 6m</h3><div class="hint">Still inside the 12-month window but quiet for 6 months — possible churn or a billing gap. Worth a check before they drop out of the book entirely.</div>
   ${tbl('<th>Client</th><th>Owner</th><th class="num">12m revenue</th>',
     lapsing.slice(0,120).map(r=>`<tr><td class="clink" onclick="goClient('${jsq(r.m.n)}')">${esc(r.m.n)}</td><td>${esc(r.owner)}</td><td class="num">${fmtE(r.rev)}</td></tr>`).join(''),'No lapsing clients.')}</div>
