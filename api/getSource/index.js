@@ -39,6 +39,14 @@ module.exports = async function (context, req) {
       if (!data) { context.res = { status:404, body:'No Autotask support file found yet.' }; return; }
       context.res = { headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) }; return;
     }
+    if (id === 'autotask-owners') {
+      // Per-account sales owner (where the Autotask owner is a sales-team member)
+      // plus the technical owner, written by the office job.
+      const { readJsonBlob } = require('../shared/store');
+      const data = await readJsonBlob('autotask-owners.json');
+      if (!data) { context.res = { status:404, body:'No Autotask owners file found yet.' }; return; }
+      context.res = { headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) }; return;
+    }
     context.res = { status:404, body:`Unknown source '${id}'.` };
   } catch (e) { context.res = { status:502, body:'Source fetch failed: ' + (e.message || String(e)) }; }
 };
