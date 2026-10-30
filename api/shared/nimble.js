@@ -50,18 +50,18 @@ async function fetchJSON(url,hdr,timeoutMs){
   finally{ clearTimeout(to); }
 }
 async function fetchDeals(token,perPage,maxPages){
-  perPage=perPage||100; maxPages=maxPages||8;        // bounded so the function can't run long
+  perPage=perPage||100; maxPages=maxPages||4;        // bounded so the function can't run long
   const byId={}; let count=0, raw=0, page=1, pages=1;
   const dbg={status:null,topKeys:null,listKey:null,listLen:null,metaKeys:null,firstKeys:null,firstStatus:null,firstContactIds:null,stopped:null};
   // Current Nimble Deals API is v2 on app.nimble.com, authed with X-Nimble-Token.
   // Send both auth styles so a Bearer-style token also works if that's what we hold.
   const hdr={ 'X-Nimble-Token':token, 'Authorization':`Bearer ${token}`, 'Accept':'application/json' };
-  const budgetMs=22000, t0=Date.now();
+  const budgetMs=8000, t0=Date.now();
   try{
     do{
       if(Date.now()-t0>budgetMs){ dbg.stopped='time-budget'; break; }
       const url=`https://app.nimble.com/api/v2/deals?per_page=${perPage}&page=${page}`;
-      const r=await fetchJSON(url,hdr,10000);
+      const r=await fetchJSON(url,hdr,5000);
       if(page===1) dbg.status=r.status;
       if(!r.ok){ return { byId, count, raw, error:`deals ${r.status}: ${(r.text||'').slice(0,160)}`, dbg }; }
       const data=r.json||{};
@@ -80,11 +80,16 @@ async function fetchDeals(token,perPage,maxPages){
   return { byId, count, raw, error:null, dbg };
 }
 
+async function fetchPageSafe(token,page,perPage){
+  try{ return await fetchPage(token,page,perPage); }
+  catch(e){ return { resources:[], __err:String(e&&e.message||e) }; }
+}
 async function getCrmData(token,opts){
-  opts=opts||{}; const perPage=opts.perPage||30, maxPages=opts.maxPages||200;
-  const accounts=[]; let page=1, pages=1;
-  do{
-    const data=await fetchPage(token,page,perPage);
+  opts=opts||{};
+  const perPage=opts.perPage||100, maxPages=opts.maxPages||200, conc=opts.conc||4;
+  const tAll=Date.now();
+  const accounts=[]; const pageErrs=[];
+  const collect=data=>{
     const list=data.resources||data.contacts||[];
     for(const c of list){
       const tags=tagsOf(c); const r=resolveAccount(tags);
@@ -93,20 +98,33 @@ async function getCrmData(token,opts){
         owner_id:(c.owner_id!=null?c.owner_id:(c.owner&&c.owner.id)||null), owner_name:ownerNameOf(c),
         lastContactDays:lastContactDaysOf(c), pipeline:[] });
     }
-    pages=(data.meta&&(data.meta.pages||data.meta.total_pages))||pages; page++;
-  }while(page<=pages&&page<=maxPages);
+    if(data.__err)pageErrs.push(data.__err);
+  };
+  const tC=Date.now();
+  // page 1 first to learn the total page count, then fetch 2..N in parallel (bounded).
+  const first=await fetchPage(token,1,perPage); collect(first);
+  let pages=(first.meta&&(first.meta.pages||first.meta.total_pages))||1;
+  const total=Math.min(pages,maxPages);
+  let next=2;
+  async function worker(){ while(next<=total){ const p=next++; collect(await fetchPageSafe(token,p,perPage)); } }
+  const workers=[]; for(let i=0;i<Math.min(conc,Math.max(0,total-1));i++)workers.push(worker());
+  await Promise.all(workers);
+  const msContacts=Date.now()-tC;
 
   // deals: fetch once, attach to accounts by matching contact id -> crmId.
   // Fully isolated: any failure here must never break the accounts feed.
   let deals={byId:{},count:0,raw:0,error:null,dbg:null};
+  const tD=Date.now();
   try{ deals=await fetchDeals(token, opts.dealsPerPage, opts.dealsMaxPages); }
   catch(e){ deals={byId:{},count:0,raw:0,error:'fetchDeals threw: '+String(e&&e.message||e),dbg:null}; }
+  const msDeals=Date.now()-tD;
   let attached=0;
   if(deals && deals.byId){
     for(const a of accounts){ const key=a.crmId!=null?String(a.crmId):null; if(key&&deals.byId[key]){ a.pipeline=deals.byId[key]; attached+=a.pipeline.length; } }
   }
   return { generated:new Date().toISOString(), source:'nimble', accounts,
-    meta:{ nimbleVersion:'2026-10-30-v2-hardened', pages, count:accounts.length, active:accounts.filter(a=>a.active).length,
+    meta:{ nimbleVersion:'2026-10-30-v3-fast', pages, count:accounts.length, active:accounts.filter(a=>a.active).length,
+      msContacts, msDeals, msTotal:Date.now()-tAll, pageErrs:pageErrs.slice(0,3),
       deals:(deals?deals.count:0), rawDeals:(deals?deals.raw:0), dealsAttached:attached,
       dealsError:(deals?deals.error:'not fetched'), dealsDebug:(deals?deals.dbg:null) } };
 }
