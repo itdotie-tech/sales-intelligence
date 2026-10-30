@@ -38,10 +38,18 @@ function dealContactIds(d){
   if(d.company&&typeof d.company==='object')add(d.company);
   return [...ids];
 }
+// --- Nimble v2 deal field readers ---
+function dealFV(d,name){ const fv=d&&d.fields_values_with_names; if(!fv||typeof fv!=='object')return null; const arr=fv[name]; if(Array.isArray(arr)&&arr.length){ const p=arr.find(x=>x&&x.is_primary)||arr[0]; return p&&p.value!=null?p.value:null; } return null; }
+function stageInfo(d){ const s=d&&d.stage; if(s&&typeof s==='object')return { name:s.name||'', role:(s.role&&s.role.name)||'', final:!!(s.role&&s.role.is_final) }; return { name:(typeof s==='string'?s:''), role:'', final:false }; }
 function normDeal(d){
-  return { id:d.id||d.record_id||null, title:d.title||d.name||d.stage_name||'(untitled deal)',
-    value:dealNum(d.value!=null?d.value:d.amount), stage:dealStage(d), probability:dealProb(d),
-    closeDate:dealClose(d), ageDays:ageDaysOf(d), status:dealStatus(d) };
+  const si=stageInfo(d);
+  const val=+(((dealFV(d,'amount')||dealFV(d,'value')||'0')+'').replace(/[^0-9.\-]/g,''))||0;
+  const prob=(d.final_probability!=null?+d.final_probability:(dealFV(d,'probability')!=null?+dealFV(d,'probability'):null));
+  return { id:d.deal_id||d.id||null, title:dealFV(d,'name')||dealFV(d,'title')||si.name||'(untitled deal)',
+    value:val, stage:si.name, stageRole:si.role, isFinal:si.final, probability:prob,
+    closeDate:dealFV(d,'expected_close_date')||dealFV(d,'actual_close_date')||null,
+    ageDays:(d.age_in_days!=null?d.age_in_days:ageDaysOf(d)),
+    owner:(d.owner&&typeof d.owner==='object'?(d.owner.name||''):(d.owner||'')), pipeline:d.pipeline_name||'' };
 }
 // Fetch all deals; returns { byContactId: Map(id -> [normDeal]), count, error }
 async function fetchJSON(url,hdr,timeoutMs){
@@ -49,38 +57,28 @@ async function fetchJSON(url,hdr,timeoutMs){
   try{ const res=await fetch(url,{headers:hdr,signal:ac.signal}); const text=await res.text().catch(()=> ''); let json=null; try{ json=text?JSON.parse(text):null; }catch(e){} return {ok:res.ok,status:res.status,json,text}; }
   finally{ clearTimeout(to); }
 }
-async function fetchDeals(token,perPage,maxPages){
-  perPage=perPage||100; maxPages=maxPages||20;       // bounded so the function can't run long
-  const byId={}; let count=0, raw=0, page=1, pages=1;
-  const stageSet=new Set(), pipeSet=new Set();
-  const dbg={status:null,topKeys:null,listKey:null,listLen:null,metaKeys:null,dealTotal:null,dealPages:null,firstKeys:null,firstStatus:null,firstContactIds:null,sample:null,stages:null,pipelines:null,stopped:null};
-  // Current Nimble Deals API is v2 on app.nimble.com, authed with X-Nimble-Token.
-  // Send both auth styles so a Bearer-style token also works if that's what we hold.
+// Fetch OPEN deals. Page 1 is the oldest deals, so the live pipeline lives on the
+// last pages — we fetch from the newest end, bounded + concurrent, and keep only
+// deals whose stage is not final (not won/lost). Attaches by related contact id.
+async function fetchDeals(token,opts){
+  opts=opts||{};
+  const perPage=100, conc=4, maxFetch=opts.dealsMaxFetch||30;   // up to ~3000 newest deals
+  const byId={}; let scanned=0, open=0;
+  const stageCount={}; let sample=null, sampleErr=null;
   const hdr={ 'X-Nimble-Token':token, 'Authorization':`Bearer ${token}`, 'Accept':'application/json' };
-  const budgetMs=8000, t0=Date.now();
-  try{
-    do{
-      if(Date.now()-t0>budgetMs){ dbg.stopped='time-budget'; break; }
-      const url=`https://app.nimble.com/api/v2/deals?per_page=${perPage}&page=${page}`;
-      const r=await fetchJSON(url,hdr,5000);
-      if(page===1) dbg.status=r.status;
-      if(!r.ok){ return { byId, count, raw, error:`deals ${r.status}: ${(r.text||'').slice(0,160)}`, dbg }; }
-      const data=r.json||{};
-      let list=data.resources, lk='resources';
-      if(!Array.isArray(list)){ if(Array.isArray(data.deals)){list=data.deals;lk='deals';} else if(Array.isArray(data.data)){list=data.data;lk='data';} else if(Array.isArray(data.results)){list=data.results;lk='results';} else if(Array.isArray(data)){list=data;lk='(array)';} else {list=[];lk='(none)';} }
-      if(page===1){ dbg.topKeys=Object.keys(data||{}).slice(0,25); dbg.listKey=lk; dbg.listLen=list.length; if(data&&data.meta&&typeof data.meta==='object'){dbg.metaKeys=Object.keys(data.meta).slice(0,15);dbg.dealTotal=data.meta.total;dbg.dealPages=data.meta.pages;} if(list[0]){ const s0=list[0]; dbg.firstKeys=Object.keys(s0).slice(0,50); dbg.firstStatus=dealStatus(s0); dbg.firstContactIds=dealContactIds(s0).slice(0,8); dbg.sample={ deal_id:s0.deal_id, stage:s0.stage, pipeline_name:s0.pipeline_name, final_probability:s0.final_probability, age_in_days:s0.age_in_days, owner:s0.owner, fields_values_with_names:s0.fields_values_with_names, stage_transitions:(s0.stage_transitions||[]).slice(0,3) }; } }
-      for(const d of list){
-        raw++;
-        stageSet.add(dealStage(d)); if(d.pipeline_name)pipeSet.add(d.pipeline_name);
-        const st=dealStatus(d); if(st==='won'||st==='lost'||st==='closed') continue;
-        const nd=normDeal(d); count++;
-        for(const cid of dealContactIds(d)){ (byId[cid]=byId[cid]||[]).push(nd); }
-      }
-      pages=(data.meta&&(data.meta.pages||data.meta.total_pages||data.meta.page_count))||pages; page++;
-    }while(page<=pages&&page<=maxPages);
-  }catch(e){ dbg.stages=[...stageSet].slice(0,40); dbg.pipelines=[...pipeSet].slice(0,20); return { byId, count, raw, error:String(e&&(e.name==='AbortError'?'timeout':e.message)||e), dbg }; }
-  dbg.stages=[...stageSet].slice(0,40); dbg.pipelines=[...pipeSet].slice(0,20);
-  return { byId, count, raw, error:null, dbg };
+  const budgetMs=9000, t0=Date.now();
+  const getPage=p=>fetchJSON(`https://app.nimble.com/api/v2/deals?per_page=${perPage}&page=${p}`,hdr,5000);
+  const first=await getPage(1);
+  if(!first.ok) return { byId, scanned:0, open:0, error:`deals ${first.status}: ${(first.text||'').slice(0,160)}`, dbg:{status:first.status,stageCount,sample,sampleErr} };
+  const meta1=(first.json&&first.json.meta)||{}; const pages=meta1.pages||1; const dealTotal=meta1.total||null;
+  const process=list=>{ for(const d of (list||[])){ scanned++; let nd; try{ nd=normDeal(d); }catch(e){ if(!sampleErr)sampleErr=String(e&&e.message||e); continue; } stageCount[nd.stage]=(stageCount[nd.stage]||0)+1; const isOpen=!nd.isFinal && nd.stageRole!=='won' && nd.stageRole!=='lost'; if(!isOpen)continue; open++; if(!sample)sample={ title:nd.title, value:nd.value, stage:nd.stage, role:nd.stageRole, prob:nd.probability, close:nd.closeDate, owner:nd.owner, pipeline:nd.pipeline }; try{ for(const cid of dealContactIds(d)){ (byId[cid]=byId[cid]||[]).push(nd); } }catch(e){} } };
+  if(pages<=1){ process((first.json&&first.json.resources)||[]); return { byId, scanned, open, error:null, dbg:{ dealTotal, pages, pagesQueued:1, stageCount, sample, sampleErr, ms:Date.now()-t0 } }; }
+  const startP=pages, endP=Math.max(2,pages-maxFetch+1);
+  const queue=[]; for(let p=startP;p>=endP;p--)queue.push(p);
+  let qi=0, budgetHit=false;
+  async function worker(){ while(qi<queue.length){ if(Date.now()-t0>budgetMs){budgetHit=true;return;} const p=queue[qi++]; let r=null; try{ r=await getPage(p); }catch(e){} if(r&&r.ok&&r.json){ process(r.json.resources||[]); } } }
+  const ws=[]; for(let i=0;i<conc;i++)ws.push(worker()); await Promise.all(ws);
+  return { byId, scanned, open, error:null, dbg:{ dealTotal, pages, pagesQueued:queue.length, budgetHit, stageCount, sample, sampleErr, ms:Date.now()-t0 } };
 }
 
 async function fetchPageSafe(token,page,perPage){
@@ -116,19 +114,19 @@ async function getCrmData(token,opts){
 
   // deals: fetch once, attach to accounts by matching contact id -> crmId.
   // Fully isolated: any failure here must never break the accounts feed.
-  let deals={byId:{},count:0,raw:0,error:null,dbg:null};
+  let deals={byId:{},open:0,scanned:0,error:null,dbg:null};
   const tD=Date.now();
-  try{ deals=await fetchDeals(token, opts.dealsPerPage, opts.dealsMaxPages); }
-  catch(e){ deals={byId:{},count:0,raw:0,error:'fetchDeals threw: '+String(e&&e.message||e),dbg:null}; }
+  try{ deals=await fetchDeals(token, opts); }
+  catch(e){ deals={byId:{},open:0,scanned:0,error:'fetchDeals threw: '+String(e&&e.message||e),dbg:null}; }
   const msDeals=Date.now()-tD;
   let attached=0;
   if(deals && deals.byId){
     for(const a of accounts){ const key=a.crmId!=null?String(a.crmId):null; if(key&&deals.byId[key]){ a.pipeline=deals.byId[key]; attached+=a.pipeline.length; } }
   }
   return { generated:new Date().toISOString(), source:'nimble', accounts,
-    meta:{ nimbleVersion:'2026-10-30-v4-probe', pages, count:accounts.length, active:accounts.filter(a=>a.active).length,
+    meta:{ nimbleVersion:'2026-10-30-v8-open', pages, count:accounts.length, active:accounts.filter(a=>a.active).length,
       msContacts, msDeals, msTotal:Date.now()-tAll, pageErrs:pageErrs.slice(0,3),
-      deals:(deals?deals.count:0), rawDeals:(deals?deals.raw:0), dealsAttached:attached,
+      deals:(deals?deals.open:0), scanned:(deals?deals.scanned:0), dealsAttached:attached,
       dealsError:(deals?deals.error:'not fetched'), dealsDebug:(deals?deals.dbg:null) } };
 }
 module.exports = { getCrmData };
