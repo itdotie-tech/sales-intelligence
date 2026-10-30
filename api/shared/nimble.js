@@ -50,10 +50,9 @@ async function fetchJSON(url,hdr,timeoutMs){
   finally{ clearTimeout(to); }
 }
 async function fetchDeals(token,perPage,maxPages){
-  perPage=perPage||100; maxPages=maxPages||20;       // bounded so the function can't run long
+  perPage=perPage||100; maxPages=maxPages||4;        // bounded so the function can't run long
   const byId={}; let count=0, raw=0, page=1, pages=1;
-  const stageSet=new Set(), pipeSet=new Set();
-  const dbg={status:null,topKeys:null,listKey:null,listLen:null,metaKeys:null,dealTotal:null,dealPages:null,firstKeys:null,firstStatus:null,firstContactIds:null,sample:null,stages:null,pipelines:null,stopped:null};
+  const dbg={status:null,topKeys:null,listKey:null,listLen:null,metaKeys:null,firstKeys:null,firstStatus:null,firstContactIds:null,stopped:null};
   // Current Nimble Deals API is v2 on app.nimble.com, authed with X-Nimble-Token.
   // Send both auth styles so a Bearer-style token also works if that's what we hold.
   const hdr={ 'X-Nimble-Token':token, 'Authorization':`Bearer ${token}`, 'Accept':'application/json' };
@@ -68,18 +67,16 @@ async function fetchDeals(token,perPage,maxPages){
       const data=r.json||{};
       let list=data.resources, lk='resources';
       if(!Array.isArray(list)){ if(Array.isArray(data.deals)){list=data.deals;lk='deals';} else if(Array.isArray(data.data)){list=data.data;lk='data';} else if(Array.isArray(data.results)){list=data.results;lk='results';} else if(Array.isArray(data)){list=data;lk='(array)';} else {list=[];lk='(none)';} }
-      if(page===1){ dbg.topKeys=Object.keys(data||{}).slice(0,25); dbg.listKey=lk; dbg.listLen=list.length; if(data&&data.meta&&typeof data.meta==='object'){dbg.metaKeys=Object.keys(data.meta).slice(0,15);dbg.dealTotal=data.meta.total;dbg.dealPages=data.meta.pages;} if(list[0]){ const s0=list[0]; dbg.firstKeys=Object.keys(s0).slice(0,50); dbg.firstStatus=dealStatus(s0); dbg.firstContactIds=dealContactIds(s0).slice(0,8); dbg.sample={ deal_id:s0.deal_id, stage:s0.stage, pipeline_name:s0.pipeline_name, final_probability:s0.final_probability, age_in_days:s0.age_in_days, owner:s0.owner, fields_values_with_names:s0.fields_values_with_names, stage_transitions:(s0.stage_transitions||[]).slice(0,3) }; } }
+      if(page===1){ dbg.topKeys=Object.keys(data||{}).slice(0,25); dbg.listKey=lk; dbg.listLen=list.length; if(data&&data.meta&&typeof data.meta==='object')dbg.metaKeys=Object.keys(data.meta).slice(0,15); if(list[0]){ dbg.firstKeys=Object.keys(list[0]).slice(0,50); dbg.firstStatus=dealStatus(list[0]); dbg.firstContactIds=dealContactIds(list[0]).slice(0,8); } }
       for(const d of list){
         raw++;
-        stageSet.add(dealStage(d)); if(d.pipeline_name)pipeSet.add(d.pipeline_name);
         const st=dealStatus(d); if(st==='won'||st==='lost'||st==='closed') continue;
         const nd=normDeal(d); count++;
         for(const cid of dealContactIds(d)){ (byId[cid]=byId[cid]||[]).push(nd); }
       }
       pages=(data.meta&&(data.meta.pages||data.meta.total_pages||data.meta.page_count))||pages; page++;
     }while(page<=pages&&page<=maxPages);
-  }catch(e){ dbg.stages=[...stageSet].slice(0,40); dbg.pipelines=[...pipeSet].slice(0,20); return { byId, count, raw, error:String(e&&(e.name==='AbortError'?'timeout':e.message)||e), dbg }; }
-  dbg.stages=[...stageSet].slice(0,40); dbg.pipelines=[...pipeSet].slice(0,20);
+  }catch(e){ return { byId, count, raw, error:String(e&&(e.name==='AbortError'?'timeout':e.message)||e), dbg }; }
   return { byId, count, raw, error:null, dbg };
 }
 
@@ -126,7 +123,7 @@ async function getCrmData(token,opts){
     for(const a of accounts){ const key=a.crmId!=null?String(a.crmId):null; if(key&&deals.byId[key]){ a.pipeline=deals.byId[key]; attached+=a.pipeline.length; } }
   }
   return { generated:new Date().toISOString(), source:'nimble', accounts,
-    meta:{ nimbleVersion:'2026-10-30-v4-probe', pages, count:accounts.length, active:accounts.filter(a=>a.active).length,
+    meta:{ nimbleVersion:'2026-10-30-v3-fast', pages, count:accounts.length, active:accounts.filter(a=>a.active).length,
       msContacts, msDeals, msTotal:Date.now()-tAll, pageErrs:pageErrs.slice(0,3),
       deals:(deals?deals.count:0), rawDeals:(deals?deals.raw:0), dealsAttached:attached,
       dealsError:(deals?deals.error:'not fetched'), dealsDebug:(deals?deals.dbg:null) } };
