@@ -170,6 +170,7 @@ tr:hover td{background:rgba(0,160,216,.06)}
 <div class="prog" id="prog"><div class="spin"></div><div id="progTxt" style="color:var(--mut)">Processing…</div></div>
 <div class="modal-bg" id="settingsBg" onclick="if(event.target===this)closeSettings()"><div class="modal" id="settingsModal"></div></div>
 <div class="modal-bg" id="reportBg" onclick="if(event.target===this)closeReport()"><div class="modal" id="reportModal"></div></div>
+<div class="modal-bg" id="dealBg" onclick="if(event.target===this)closeDealModal()"><div class="modal" id="dealModal"></div></div>
 <style>
 .brtab{display:inline-flex;gap:6px;flex-wrap:wrap;margin:10px 0 0}
 .brtab button{background:var(--panel2);border:1px solid var(--line);color:var(--mut);border-radius:8px;padding:5px 11px;font-size:12px;cursor:pointer}
@@ -3419,45 +3420,128 @@ function amFromOwner(ownerName){
   return '';
 }
 
+/* ---- CRM Overview: interactive open-pipeline console ---- */
+let CRMF={owner:'',stage:'',q:''};
+let _crmDeals=[];
+function dealAM(d){ return d.owner||d.am||'Unassigned'; }
+function crmWeighted(d){ return (+d.value||0)*((d.probability!=null?+d.probability:20)/100); }
+function crmFilteredDeals(){
+  let ds=allDeals();
+  if(CRMF.owner) ds=ds.filter(d=>dealAM(d)===CRMF.owner);
+  if(CRMF.stage) ds=ds.filter(d=>(d.stage||'Unstaged')===CRMF.stage);
+  if(CRMF.q){ const q=CRMF.q.toLowerCase(); ds=ds.filter(d=>(((d.title||'')+' '+(d.account||''))).toLowerCase().includes(q)); }
+  return ds;
+}
+function setCrmF(f,v){ CRMF[f]=(CRMF[f]===v?'':v); renderCrm(); }
+function crmClear(){ CRMF={owner:'',stage:'',q:''}; renderCrm(); }
+function crmLive(v){ CRMF.q=v; const ds=crmFilteredDeals(); const kb=document.getElementById('crmKpis'), tb=document.getElementById('crmTbody'), cnt=document.getElementById('crmCount'); if(kb)kb.innerHTML=crmKpisHtml(ds); if(tb)tb.innerHTML=crmRowsHtml(ds); if(cnt)cnt.textContent=ds.length; }
+function crmKpisHtml(ds){
+  const openVal=ds.reduce((s,d)=>s+(+d.value||0),0);
+  const wVal=ds.reduce((s,d)=>s+crmWeighted(d),0);
+  const soon=ds.filter(d=>{ if(!d.closeDate)return false; const dd=(new Date(d.closeDate)-Date.now())/864e5; return dd>=0&&dd<=30; });
+  const soonV=soon.reduce((s,d)=>s+(+d.value||0),0);
+  return `<div class="card hl"><div class="k">Open pipeline</div><div class="v">${fmtEk(openVal)}</div><div class="s">${ds.length} open deals</div></div>
+    <div class="card"><div class="k">Weighted</div><div class="v">${fmtEk(wVal)}</div><div class="s">by probability</div></div>
+    <div class="card"><div class="k">Closing ≤30d</div><div class="v pos">${soon.length}</div><div class="s">${fmtEk(soonV)}</div></div>
+    <div class="card"><div class="k">Average deal</div><div class="v">${ds.length?fmtEk(openVal/ds.length):'—'}</div><div class="s">open pipeline</div></div>`;
+}
+function crmRowsHtml(ds){
+  _crmDeals=[...ds].sort((a,b)=>(+b.value||0)-(+a.value||0));
+  if(!_crmDeals.length) return '<tr><td colspan=8 class="hint">No open deals match the current filter.</td></tr>';
+  return _crmDeals.map((d,i)=>`<tr style="cursor:pointer" onclick="crmDealModal(${i})">
+    <td>${esc(d.title||'—')}</td><td>${esc(d.account||'—')}</td><td>${esc(dealAM(d))}</td>
+    <td><span class="tag">${esc(d.stage||'—')}</span></td>
+    <td class="num">${fmtE(+d.value||0)}</td><td class="num">${fmtE(crmWeighted(d))}</td>
+    <td class="num">${d.probability!=null?d.probability+'%':'—'}</td>
+    <td>${esc(d.closeDate?String(d.closeDate).slice(0,10):'—')}</td></tr>`).join('');
+}
+function crmDealModal(i){
+  const d=_crmDeals[i]; if(!d) return;
+  const rows=[['Client',d.account||'—'],['Owner',dealAM(d)],['Pipeline',d.pipeline||'—'],['Stage',d.stage||'—'],['Value',fmtE(+d.value||0)],['Weighted (by prob.)',fmtE(crmWeighted(d))],['Probability',d.probability!=null?d.probability+'%':'—'],['Expected close',d.closeDate?String(d.closeDate).slice(0,10):'—'],['Age in stage',d.ageDays!=null?d.ageDays+' days':'—'],['Last account contact',d.lastContact!=null?d.lastContact+' days ago':'—']];
+  document.getElementById('dealModal').innerHTML=`<h2>${esc(d.title||'Opportunity')}</h2>
+    <div class="hint" style="margin-bottom:14px">Open opportunity from Nimble.</div>
+    <table><tbody>${rows.map(r=>`<tr><td class="hint" style="margin:0;width:190px">${esc(r[0])}</td><td><b>${esc(String(r[1]))}</b></td></tr>`).join('')}</tbody></table>
+    <div style="margin-top:18px;text-align:right"><button class="btn ghost" onclick="closeDealModal()">Close</button></div>`;
+  document.getElementById('dealBg').classList.add('on');
+}
+function closeDealModal(){ const b=document.getElementById('dealBg'); if(b)b.classList.remove('on'); }
+function crmReport(){
+  const ds=crmFilteredDeals();
+  const head=['Deal','Client','Owner','Stage','Pipeline','Value','Weighted','Probability%','CloseDate','AgeDays','LastContactDays'];
+  const rows=ds.map(d=>[d.title,d.account,dealAM(d),d.stage,d.pipeline,(+d.value||0),Math.round(crmWeighted(d)),(d.probability!=null?d.probability:''),(d.closeDate?String(d.closeDate).slice(0,10):''),(d.ageDays!=null?d.ageDays:''),(d.lastContact!=null?d.lastContact:'')]);
+  const csv=[head,...rows].map(r=>r.map(x=>{x=String(x==null?'':x);return /[",\n]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x;}).join(',')).join('\n');
+  dl(csv,'itie-open-opportunities.csv','text/csv;charset=utf-8');
+}
 function renderCrm(){
   if(!hasCrm()){ document.getElementById('pg-crm').innerHTML='<div class="lockmsg"><div class="big">🔗</div><h2>No CRM feed loaded</h2><p>Connect Nimble on the Data Hub. Once the feed is in, this section analyses your CRM on its own, with or without NetSuite.</p><button class="btn" style="margin-top:16px" onclick="go(\'data\')">Open the Data Hub</button></div>'; return; }
   crmAnalyse(); const A=CRMA;
+  const all=allDeals();
+  const when=A.loadedAt?new Date(A.loadedAt).toLocaleString('en-IE',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'';
   let realByMgr=null;
   if(typeof hasData!=='undefined'&&hasData){ realByMgr={}; for(let i=0;i<NC0;i++){ const m=META[i]; if(!isClient(m))continue; const o=ownerOf(m.n)||'Unassigned'; realByMgr[o]=(realByMgr[o]||0)+1; } }
   const mgrRows=Object.entries(realByMgr||A.byManager).sort((a,b)=>b[1]-a[1]);
   const svcTags=Object.entries(A.tagCounts).filter(([t])=>!isAccountTag(t)).sort((a,b)=>b[1]-a[1]);
-  const when=A.loadedAt?new Date(A.loadedAt).toLocaleString('en-IE',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'';
+
+  if(!all.length){
+    document.getElementById('pg-crm').innerHTML=`
+    <h1 class="ph">CRM <em>Overview</em></h1>
+    <p class="psub">Straight from Nimble. No open deals in the feed yet, so this shows ownership and footprint. ${when?`Feed loaded ${when}.`:''}</p>
+    <div class="grid cards">
+      <div class="card"><div class="k">Accounts in Nimble</div><div class="v">${A.total.toLocaleString()}</div><div class="s">people and companies</div></div>
+      <div class="card"><div class="k">Active clients</div><div class="v pos">${A.active.toLocaleString()}</div><div class="s">tagged to a manager</div></div>
+      <div class="card"><div class="k">Pipeline / prospects</div><div class="v">${A.prospects.toLocaleString()}</div><div class="s">untagged</div></div>
+      <div class="card"><div class="k">Dormant</div><div class="v">${A.dormant.toLocaleString()}</div><div class="s">marked (D), excluded</div></div>
+    </div>
+    <div class="two">
+      <div class="panel"><h3>Active clients by manager</h3><div class="chartbox"><canvas id="chCrmMgr"></canvas></div></div>
+      <div class="panel"><h3>Service footprint from tags</h3><div class="chartbox"><canvas id="chCrmTags"></canvas></div></div>
+    </div>`;
+    mkChart('chCrmMgr',{type:'bar',data:{labels:mgrRows.map(r=>r[0]),datasets:[{label:'Active clients',data:mgrRows.map(r=>r[1]),backgroundColor:mgrRows.map((_,i)=>PALETTE[i%PALETTE.length])}]},options:{maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{precision:0}}}}});
+    const tg=svcTags.slice(0,10);
+    mkChart('chCrmTags',{type:'bar',data:{labels:tg.map(r=>r[0]),datasets:[{label:'Accounts',data:tg.map(r=>r[1]),backgroundColor:'#00a0d8'}]},options:{indexAxis:'y',maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{precision:0}}}}});
+    return;
+  }
+
+  const owners=[...new Set(all.map(dealAM))].sort();
+  const stages=[...new Set(all.map(d=>d.stage||'Unstaged'))].sort();
+  const ds=crmFilteredDeals();
+  const byOwner={}; all.forEach(d=>{ const k=dealAM(d); (byOwner[k]=byOwner[k]||{n:0,v:0}); byOwner[k].n++; byOwner[k].v+=(+d.value||0); });
+  const byStage={}; all.forEach(d=>{ const k=d.stage||'Unstaged'; (byStage[k]=byStage[k]||{n:0,v:0}); byStage[k].n++; byStage[k].v+=(+d.value||0); });
+  const ownerSel=`<select onchange="setCrmF('owner',this.value)"><option value="">All owners</option>${owners.map(o=>`<option${o===CRMF.owner?' selected':''}>${esc(o)}</option>`).join('')}</select>`;
+  const stageSel=`<select onchange="setCrmF('stage',this.value)"><option value="">All stages</option>${stages.map(s=>`<option${s===CRMF.stage?' selected':''}>${esc(s)}</option>`).join('')}</select>`;
+  const totOpen=all.reduce((s,d)=>s+(+d.value||0),0);
   document.getElementById('pg-crm').innerHTML=`
   <h1 class="ph">CRM <em>Overview</em></h1>
-  <p class="psub">Straight from Nimble, independent of NetSuite. Active clients are the tagged accounts under each manager; everything else is pipeline for lead scoring later. ${hasData?'NetSuite is connected, so revenue sits alongside this on the other pages.':'NetSuite is not connected, so this is the CRM picture on its own. Load the workbook or the NetSuite feed to add revenue.'}${when?` Feed loaded ${when}.`:''}</p>
-  <div class="grid cards">
-    <div class="card"><div class="k">Accounts in Nimble</div><div class="v">${A.total.toLocaleString()}</div><div class="s">people and companies</div></div>
-    <div class="card"><div class="k">Active clients</div><div class="v pos">${A.active.toLocaleString()}</div><div class="s">tagged to a manager</div></div>
-    <div class="card"><div class="k">Pipeline / prospects</div><div class="v">${A.prospects.toLocaleString()}</div><div class="s">untagged, for lead scoring</div></div>
-    <div class="card"><div class="k">Dormant</div><div class="v">${A.dormant.toLocaleString()}</div><div class="s">marked (D), excluded</div></div>
+  <p class="psub">Live open pipeline from Nimble — ${all.length} open opportunities worth ${fmtEk(totOpen)}. Filter by owner or stage, click a bar to drill in, and click any opportunity for its detail. Owner is the deal owner in Nimble. ${when?`Feed loaded ${when}.`:''}</p>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:0 0 14px">
+    ${ownerSel}${stageSel}
+    <input placeholder="search deal or client" value="${esc(CRMF.q)}" oninput="crmLive(this.value)" style="background:var(--navy2);border:1px solid var(--line);border-radius:8px;color:#fff;padding:8px 10px;font-size:13px;min-width:200px">
+    <button class="btn ghost sm" onclick="crmClear()">Clear</button>
+    <button class="btn sm" onclick="crmReport()">Export report</button>
+    ${(CRMF.owner||CRMF.stage)?`<span class="tag g">Filtered: ${esc([CRMF.owner,CRMF.stage].filter(Boolean).join(' · '))}</span>`:''}
   </div>
+  <div class="grid cards" id="crmKpis">${crmKpisHtml(ds)}</div>
   <div class="two">
-    <div class="panel"><h3>Active clients by manager</h3><div class="hint">Book size from the account tags. This is the roster each manager owns, before any revenue is attached.</div>
-    <div class="chartbox"><canvas id="chCrmMgr"></canvas></div>
-    <div class="twrap" style="max-height:280px;margin-top:10px"><table><thead><tr><th>Manager</th><th class="num">Active clients</th><th class="num">Share</th></tr></thead><tbody>
-    ${mgrRows.map(([m,n])=>`<tr><td>${esc(m)}</td><td class="num">${n}</td><td class="num">${A.active?fmtP(n/A.active):'—'}</td></tr>`).join('')||'<tr><td colspan=3 class="hint">No tagged accounts found. Check the tag format in Nimble.</td></tr>'}
+    <div class="panel"><h3>Open pipeline by owner</h3><div class="hint">Click a bar to filter. Open-deal value per deal owner.</div><div class="chartbox"><canvas id="chCrmOwner"></canvas></div></div>
+    <div class="panel"><h3>Open pipeline by stage</h3><div class="hint">Click a bar to filter. Where the value sits in the funnel.</div><div class="chartbox"><canvas id="chCrmStage"></canvas></div></div>
+  </div>
+  <div class="panel"><h3>Opportunities <span class="hint" style="margin:0">(<span id="crmCount">${ds.length}</span> shown — click a row for detail)</span></h3>
+  <div class="twrap" style="max-height:520px"><table><thead><tr><th>Deal</th><th>Client</th><th>Owner</th><th>Stage</th><th class="num">Value</th><th class="num">Weighted</th><th class="num">Prob</th><th>Close</th></tr></thead>
+  <tbody id="crmTbody">${crmRowsHtml(ds)}</tbody></table></div></div>
+  <details style="margin-top:16px"><summary class="hint" style="cursor:pointer">Book &amp; tag footprint — ownership from tags, service spread</summary>
+  <div class="two" style="margin-top:12px">
+    <div class="panel"><h3>Active clients by manager</h3><div class="twrap" style="max-height:300px"><table><thead><tr><th>Manager</th><th class="num">Active</th><th class="num">Share</th></tr></thead><tbody>
+    ${mgrRows.map(([m,n])=>`<tr><td>${esc(m)}</td><td class="num">${n}</td><td class="num">${A.active?fmtP(n/A.active):'—'}</td></tr>`).join('')||'<tr><td colspan=3 class="hint">No tagged accounts found.</td></tr>'}
     </tbody></table></div></div>
-    <div class="panel"><h3>Service footprint from tags</h3><div class="hint">What the CRM records each account carries, such as the CyberProtect tiers. A quick read on product spread across the base, straight from Nimble tags.</div>
-    <div class="chartbox"><canvas id="chCrmTags"></canvas></div>
-    <div class="twrap" style="max-height:280px;margin-top:10px"><table><thead><tr><th>Tag</th><th class="num">Accounts</th></tr></thead><tbody>
+    <div class="panel"><h3>Service footprint from tags</h3><div class="twrap" style="max-height:300px"><table><thead><tr><th>Tag</th><th class="num">Accounts</th></tr></thead><tbody>
     ${svcTags.slice(0,25).map(([t,n])=>`<tr><td>${esc(t)}</td><td class="num">${n}</td></tr>`).join('')||'<tr><td colspan=2 class="hint">No service tags found.</td></tr>'}
     </tbody></table></div></div>
-  </div>
-  <div class="panel"><h3>Account tags found in Nimble</h3><div class="hint">Every ownership tag detected, with how many accounts carry it. If a manager looks light, this shows whether it is a tagging gap in Nimble rather than a dashboard miss. Expected format is like "DF Accounts".</div>
-  <div class="twrap" style="max-height:280px"><table><thead><tr><th>Tag</th><th class="num">Accounts</th></tr></thead><tbody>
-  ${Object.entries(A.accountTagCounts||{}).sort((a,b)=>b[1]-a[1]).map(([t,n])=>`<tr><td>${esc(t)}</td><td class="num">${n}</td></tr>`).join('')||'<tr><td colspan=2 class="hint">No account tags detected. Check the tags in Nimble are applied and spelled as expected.</td></tr>'}
-  </tbody></table></div></div>
-  ${hasData?`<div class="note"><b>Reconciliation.</b> NetSuite is connected, so head to <span class="clink" onclick="go('recon')">Account Reconciliation</span> to link names and clear any manager conflicts, which sharpens every figure across the dashboard.</div>`:`<div class="note"><b>Add revenue.</b> This is ownership and footprint only. Load the NetSuite workbook or connect the API to bring in MRR, posture and the opportunity engine beside it.</div>`}`;
+  </div></details>`;
 
-  const mgrColors=mgrRows.map((_,i)=>PALETTE[i%PALETTE.length]);
-  mkChart('chCrmMgr',{type:'bar',data:{labels:mgrRows.map(r=>r[0]),datasets:[{label:'Active clients',data:mgrRows.map(r=>r[1]),backgroundColor:mgrColors}]},options:{maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{precision:0}}}}});
-  const tg=svcTags.slice(0,10);
-  mkChart('chCrmTags',{type:'bar',data:{labels:tg.map(r=>r[0]),datasets:[{label:'Accounts',data:tg.map(r=>r[1]),backgroundColor:'#00a0d8'}]},options:{indexAxis:'y',maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{precision:0}}}}});
+  const ow=Object.entries(byOwner).sort((a,b)=>b[1].v-a[1].v);
+  mkChart('chCrmOwner',{type:'bar',data:{labels:ow.map(x=>x[0]),datasets:[{label:'Open value',data:ow.map(x=>x[1].v),backgroundColor:ow.map((_,i)=>PALETTE[i%PALETTE.length])}]},options:{indexAxis:'y',maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{callback:fmtEk}}},onClick:(e,els,ch)=>{ if(els[0])setCrmF('owner',ch.data.labels[els[0].index]); }}});
+  const stg=Object.entries(byStage).sort((a,b)=>b[1].v-a[1].v);
+  mkChart('chCrmStage',{type:'bar',data:{labels:stg.map(x=>x[0]),datasets:[{label:'Open value',data:stg.map(x=>x[1].v),backgroundColor:stg.map((_,i)=>PALETTE[i%PALETTE.length])}]},options:{maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{callback:fmtEk}}},onClick:(e,els,ch)=>{ if(els[0])setCrmF('stage',ch.data.labels[els[0].index]); }}});
 }
 
 
@@ -3466,7 +3550,7 @@ function renderCrm(){
    is extended to fetch deals and activity; until then they degrade to a clear state
    and the assignment view still works from book size. */
 function allDeals(){ const feed=crmFeed(); if(!feed) return []; const out=[];
-  (feed.accounts||[]).forEach(a=>(a.pipeline||[]).forEach(d=>out.push({...d, account:a.name, am:accCls(a).am||'Unassigned'})));
+  (feed.accounts||[]).forEach(a=>(a.pipeline||[]).forEach(d=>out.push({...d, account:a.name, am:accCls(a).am||'Unassigned', lastContact:a.lastContactDays, crmId:a.crmId})));
   return out; }
 function hasPipeline(){ return allDeals().length>0; }
 function dealAge(d){ if(d.ageDays!=null) return d.ageDays; return null; }
