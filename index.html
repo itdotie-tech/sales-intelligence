@@ -3472,6 +3472,7 @@ function crmReport(){
   const csv=[head,...rows].map(r=>r.map(x=>{x=String(x==null?'':x);return /[",\n]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x;}).join(',')).join('\n');
   dl(csv,'itie-open-opportunities.csv','text/csv;charset=utf-8');
 }
+function crmBar(p){ mkChart(p.id,{type:'bar',data:{labels:p.data.map(x=>x[0]),datasets:[{label:'Open value',data:p.data.map(x=>x[1].v),backgroundColor:p.data.map((_,i)=>PALETTE[i%PALETTE.length])}]},options:{indexAxis:p.horiz?'y':'x',maintainAspectRatio:false,plugins:{legend:{display:false}},scales:p.horiz?{x:{ticks:{callback:fmtEk}}}:{y:{ticks:{callback:fmtEk}}},onClick:p.click?(e,els,ch)=>{ if(els[0])setCrmF(p.click,ch.data.labels[els[0].index]); }:undefined}}); }
 function renderCrm(){
   if(!hasCrm()){ document.getElementById('pg-crm').innerHTML='<div class="lockmsg"><div class="big">🔗</div><h2>No CRM feed loaded</h2><p>Connect Nimble on the Data Hub. Once the feed is in, this section analyses your CRM on its own, with or without NetSuite.</p><button class="btn" style="margin-top:16px" onclick="go(\'data\')">Open the Data Hub</button></div>'; return; }
   crmAnalyse(); const A=CRMA;
@@ -3510,6 +3511,17 @@ function renderCrm(){
   const ownerSel=`<select onchange="setCrmF('owner',this.value)"><option value="">All owners</option>${owners.map(o=>`<option${o===CRMF.owner?' selected':''}>${esc(o)}</option>`).join('')}</select>`;
   const stageSel=`<select onchange="setCrmF('stage',this.value)"><option value="">All stages</option>${stages.map(s=>`<option${s===CRMF.stage?' selected':''}>${esc(s)}</option>`).join('')}</select>`;
   const totOpen=all.reduce((s,d)=>s+(+d.value||0),0);
+  // panels refocus when a manager is selected: owner view → that manager's stages + top accounts
+  let panelA, panelB;
+  if(CRMF.owner){
+    const byStageF={}; ds.forEach(d=>{ const k=d.stage||'Unstaged'; (byStageF[k]=byStageF[k]||{v:0}); byStageF[k].v+=(+d.value||0); });
+    const byAcc={}; ds.forEach(d=>{ const k=d.account||'—'; (byAcc[k]=byAcc[k]||{v:0}); byAcc[k].v+=(+d.value||0); });
+    panelA={id:'chCrmA',title:`${esc(CRMF.owner)} — by stage`,hint:'Click a bar to narrow to a stage.',data:Object.entries(byStageF).sort((a,b)=>b[1].v-a[1].v),click:'stage',horiz:false};
+    panelB={id:'chCrmB',title:`${esc(CRMF.owner)} — top accounts`,hint:'Open value by client for this manager.',data:Object.entries(byAcc).sort((a,b)=>b[1].v-a[1].v).slice(0,12),click:null,horiz:true};
+  } else {
+    panelA={id:'chCrmA',title:'Open pipeline by owner',hint:'Click a bar to focus the whole page on one manager.',data:Object.entries(byOwner).sort((a,b)=>b[1].v-a[1].v),click:'owner',horiz:true};
+    panelB={id:'chCrmB',title:'Open pipeline by stage',hint:'Click a bar to filter.',data:Object.entries(byStage).sort((a,b)=>b[1].v-a[1].v),click:'stage',horiz:false};
+  }
   document.getElementById('pg-crm').innerHTML=`
   <h1 class="ph">CRM <em>Overview</em></h1>
   <p class="psub">Live open pipeline from Nimble — ${all.length} open opportunities worth ${fmtEk(totOpen)}. Filter by owner or stage, click a bar to drill in, and click any opportunity for its detail. Owner is the deal owner in Nimble. ${when?`Feed loaded ${when}.`:''}</p>
@@ -3522,8 +3534,8 @@ function renderCrm(){
   </div>
   <div class="grid cards" id="crmKpis">${crmKpisHtml(ds)}</div>
   <div class="two">
-    <div class="panel"><h3>Open pipeline by owner</h3><div class="hint">Click a bar to filter. Open-deal value per deal owner.</div><div class="chartbox"><canvas id="chCrmOwner"></canvas></div></div>
-    <div class="panel"><h3>Open pipeline by stage</h3><div class="hint">Click a bar to filter. Where the value sits in the funnel.</div><div class="chartbox"><canvas id="chCrmStage"></canvas></div></div>
+    <div class="panel"><h3>${panelA.title}</h3><div class="hint">${panelA.hint}</div><div class="chartbox"><canvas id="${panelA.id}"></canvas></div></div>
+    <div class="panel"><h3>${panelB.title}</h3><div class="hint">${panelB.hint}</div><div class="chartbox"><canvas id="${panelB.id}"></canvas></div></div>
   </div>
   <div class="panel"><h3>Opportunities <span class="hint" style="margin:0">(<span id="crmCount">${ds.length}</span> shown — click a row for detail)</span></h3>
   <div class="twrap" style="max-height:520px"><table><thead><tr><th>Deal</th><th>Client</th><th>Owner</th><th>Stage</th><th class="num">Value</th><th class="num">Weighted</th><th class="num">Prob</th><th>Close</th></tr></thead>
@@ -3538,10 +3550,7 @@ function renderCrm(){
     </tbody></table></div></div>
   </div></details>`;
 
-  const ow=Object.entries(byOwner).sort((a,b)=>b[1].v-a[1].v);
-  mkChart('chCrmOwner',{type:'bar',data:{labels:ow.map(x=>x[0]),datasets:[{label:'Open value',data:ow.map(x=>x[1].v),backgroundColor:ow.map((_,i)=>PALETTE[i%PALETTE.length])}]},options:{indexAxis:'y',maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{callback:fmtEk}}},onClick:(e,els,ch)=>{ if(els[0])setCrmF('owner',ch.data.labels[els[0].index]); }}});
-  const stg=Object.entries(byStage).sort((a,b)=>b[1].v-a[1].v);
-  mkChart('chCrmStage',{type:'bar',data:{labels:stg.map(x=>x[0]),datasets:[{label:'Open value',data:stg.map(x=>x[1].v),backgroundColor:stg.map((_,i)=>PALETTE[i%PALETTE.length])}]},options:{maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{callback:fmtEk}}},onClick:(e,els,ch)=>{ if(els[0])setCrmF('stage',ch.data.labels[els[0].index]); }}});
+  crmBar(panelA); crmBar(panelB);
 }
 
 
@@ -3641,32 +3650,38 @@ function renderLeads(){
 function renderAssign(){
   if(!hasCrm()){ document.getElementById('pg-assign').innerHTML=lockCrmMsg('assign'); return; }
   crmAnalyse();
-  const feed=crmFeed(); const accs=feed.accounts||[];
+  const deals=allDeals();
+  // open pipeline attributed to the deal owner in Nimble (who is actively working it)
+  const byOwner={}; deals.forEach(d=>{ const m=dealAM(d); (byOwner[m]=byOwner[m]||{n:0,v:0,w:0}); byOwner[m].n++; byOwner[m].v+=(+d.value||0); byOwner[m].w+=crmWeighted(d); });
+  // client book per manager — from NetSuite ownership when present, else the Nimble tags
+  let book={};
+  if(typeof hasData!=='undefined'&&hasData){ for(let i=0;i<NC0;i++){ const m=META[i]; if(!isClient(m))continue; const o=ownerOf(m.n)||'Unassigned'; book[o]=(book[o]||0)+1; } }
+  else { book=Object.assign({},CRMA.byManager); }
   const mgrs=Object.values(AM_ROSTER);
-  const load=mgrs.map(m=>{
-    const book=CRMA.byManager[m]||0;
-    const mine=accs.filter(a=>accCls(a).am===m);
-    const openDeals=mine.reduce((s,a)=>s+((a.pipeline||[]).length),0);
-    const pipeVal=mine.reduce((s,a)=>s+((a.pipeline||[]).reduce((x,d)=>x+(+d.value||0),0)),0);
-    return {m,book,openDeals,pipeVal};
-  });
+  const load=mgrs.map(m=>{ const o=byOwner[m]||{n:0,v:0,w:0}; return {m, book:book[m]||0, openDeals:o.n, pipeVal:o.v, weighted:o.w}; });
   const pipe=load.some(l=>l.openDeals>0||l.pipeVal>0);
-  const maxBook=Math.max(1,...load.map(l=>l.book)), maxOpen=Math.max(1,...load.map(l=>l.openDeals));
-  load.forEach(l=>{ l.score = (l.book/maxBook)*(pipe?0.6:1) + (pipe?(l.openDeals/maxOpen)*0.4:0); });
+  const maxBook=Math.max(1,...load.map(l=>l.book)), maxVal=Math.max(1,...load.map(l=>l.pipeVal)), maxOpen=Math.max(1,...load.map(l=>l.openDeals));
+  // load = 40% client book + 40% open pipeline value + 20% number of open deals (value-weighted capacity)
+  load.forEach(l=>{ l.score = pipe ? (l.book/maxBook)*0.4 + (l.pipeVal/maxVal)*0.4 + (l.openDeals/maxOpen)*0.2 : (l.book/maxBook); });
   const sorted=[...load].sort((a,b)=>a.score-b.score);
   const rec=sorted[0];
+  const totVal=load.reduce((s,l)=>s+l.pipeVal,0), totDeals=load.reduce((s,l)=>s+l.openDeals,0);
   document.getElementById('pg-assign').innerHTML=`
   <h1 class="ph">Lead <em>Assignment</em></h1>
-  <p class="psub">Who has capacity for the next lead, read from each manager's book and, where present, their open pipeline. ${pipe?'':'Pipeline is not connected yet, so this balances on book size for now, and factors in open deals automatically once the deals feed is in.'} When you tell me each manager's sector or region specialisms, I will fold fit in alongside capacity so the recommendation is not on load alone.</p>
+  <p class="psub">Who has capacity for the next lead, from each manager's client book and their live open pipeline in Nimble. Load is weighted 40% book, 40% open pipeline value, 20% number of open deals — so a manager sitting on a lot of open value counts as busier than one with the same headcount but an empty pipeline. ${pipe?'':'No open deals are attributed to the roster yet, so this currently balances on book size alone.'} Tell me each manager's sector or region focus and I will fold fit in alongside capacity.</p>
+  <div class="grid cards">
+    <div class="card"><div class="k">Open pipeline (roster)</div><div class="v">${fmtEk(totVal)}</div><div class="s">${totDeals} deals across the team</div></div>
+    <div class="card hl"><div class="k">Lightest load</div><div class="v pos">${esc(rec.m)}</div><div class="s">next lead goes here</div></div>
+    <div class="card"><div class="k">Busiest</div><div class="v">${esc(sorted[sorted.length-1].m)}</div><div class="s">most on their plate</div></div>
+  </div>
   <div class="panel" style="border-color:rgba(0,160,216,.4)"><h3>Recommendation</h3>
-  <div style="font-size:15px;color:#dbe6fb">The next unassigned lead is best placed with <b style="color:var(--blue)">${esc(rec.m)}</b>, who currently carries the lightest load (${rec.book} active client${rec.book===1?'':'s'}${pipe?', '+rec.openDeals+' open deals':''}). ${sorted[1]?`Next in line: ${esc(sorted[1].m)}.`:''}</div></div>
-  <div class="panel"><h3>Manager capacity</h3><div class="hint">Lightest first. Load blends book size${pipe?' and open pipeline':''}; lower means more room to take on.</div>
+  <div style="font-size:15px;color:#dbe6fb">The next unassigned lead is best placed with <b style="color:var(--blue)">${esc(rec.m)}</b> — lightest combined load at ${rec.book} client${rec.book===1?'':'s'}${pipe?` and ${fmtEk(rec.pipeVal)} of open pipeline across ${rec.openDeals} deal${rec.openDeals===1?'':'s'}`:''}. ${sorted[1]?`Next in line: <b>${esc(sorted[1].m)}</b>.`:''}</div></div>
+  <div class="panel"><h3>Manager capacity</h3><div class="hint">Relative load, lightest first — lower means more room to take on. Combines book size, open pipeline value and open-deal count.</div>
   <div class="chartbox"><canvas id="chAssign"></canvas></div>
-  <div class="twrap" style="margin-top:10px"><table><thead><tr><th>Manager</th><th class="num">Active clients</th>${pipe?'<th class="num">Open deals</th><th class="num">Pipeline value</th>':''}<th class="num">Relative load</th></tr></thead><tbody>
-  ${sorted.map(l=>`<tr><td>${esc(l.m)}${l.m===rec.m?' <span class="tag g">recommended</span>':''}</td><td class="num">${l.book}</td>${pipe?`<td class="num">${l.openDeals}</td><td class="num">${fmtEk(l.pipeVal)}</td>`:''}<td class="num">${Math.round(l.score*100)}%</td></tr>`).join('')}
+  <div class="twrap" style="margin-top:10px"><table><thead><tr><th>Manager</th><th class="num">Active clients</th><th class="num">Open deals</th><th class="num">Open value</th><th class="num">Weighted</th><th class="num">Relative load</th></tr></thead><tbody>
+  ${sorted.map(l=>`<tr><td>${esc(l.m)}${l.m===rec.m?' <span class="tag g">recommended</span>':''}</td><td class="num">${l.book}</td><td class="num">${l.openDeals}</td><td class="num">${fmtEk(l.pipeVal)}</td><td class="num">${fmtEk(l.weighted)}</td><td class="num">${Math.round(l.score*100)}%</td></tr>`).join('')}
   </tbody></table></div></div>`;
-  const sb=[...load].sort((a,b)=>b.book-a.book);
-  mkChart('chAssign',{type:'bar',data:{labels:sb.map(l=>l.m),datasets:[{label:'Active clients',data:sb.map(l=>l.book),backgroundColor:sb.map(l=>l.m===rec.m?'#2fbf71':'#00a0d8')}]},options:{maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{precision:0}}}}});
+  mkChart('chAssign',{type:'bar',data:{labels:sorted.map(l=>l.m),datasets:[{label:'Relative load',data:sorted.map(l=>Math.round(l.score*100)),backgroundColor:sorted.map(l=>l.m===rec.m?'#2fbf71':'#00a0d8')}]},options:{indexAxis:'y',maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{callback:v=>v+'%'}}}}});
 }
 
 function lockCrmMsg(pg){ return '<div class="lockmsg"><div class="big">🔗</div><h2>No CRM feed loaded</h2><p>Connect Nimble on the Data Hub. This CRM page then works on its own, with or without NetSuite.</p><button class="btn" style="margin-top:16px" onclick="go(\'data\')">Open the Data Hub</button></div>'; }
