@@ -106,7 +106,7 @@ async function getCrmData(token,opts){
     for(const a of accounts){ const key=a.crmId!=null?String(a.crmId):null; if(key&&deals.byId[key]){ a.pipeline=deals.byId[key]; attached+=a.pipeline.length; } }
   }
   return { generated:new Date().toISOString(), source:'nimble', accounts,
-    meta:{ pages, count:accounts.length, active:accounts.filter(a=>a.active).length,
+    meta:{ nimbleVersion:'2026-10-30-v2-hardened', pages, count:accounts.length, active:accounts.filter(a=>a.active).length,
       deals:(deals?deals.count:0), rawDeals:(deals?deals.raw:0), dealsAttached:attached,
       dealsError:(deals?deals.error:'not fetched'), dealsDebug:(deals?deals.dbg:null) } };
 }
