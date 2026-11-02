@@ -3668,14 +3668,21 @@ function renderAssign(){
   if(!hasCrm()){ document.getElementById('pg-assign').innerHTML=lockCrmMsg('assign'); return; }
   crmAnalyse();
   const deals=allDeals();
+  // --- roster roles (Nov 2026) ---
+  const POOL=['Michael Daly','Emil Badea','David Groark','David Flood','Simon Collins']; // eligible for new leads
+  const SIDELINE={ 'David McDonald':'Director of Sales — profile shown, not assigned leads',
+                   'Eoghan Johnson':'Leaving soon — no new accounts',
+                   "Derek O'Callaghan":'Leaving soon — no new accounts' };           // visible, never recommended
+  const HIDE=['Eamon Gallagher'];                                                      // MD — excluded entirely
   // open pipeline attributed to the deal owner in Nimble (who is actively working it)
   const byOwner={}; deals.forEach(d=>{ const m=dealAM(d); (byOwner[m]=byOwner[m]||{n:0,v:0,w:0}); byOwner[m].n++; byOwner[m].v+=(+d.value||0); byOwner[m].w+=crmWeighted(d); });
   // client book per manager — from NetSuite ownership when present, else the Nimble tags
   let book={};
   if(typeof hasData!=='undefined'&&hasData){ for(let i=0;i<NC0;i++){ const m=META[i]; if(!isClient(m))continue; const o=ownerOf(m.n)||'Unassigned'; book[o]=(book[o]||0)+1; } }
   else { book=Object.assign({},CRMA.byManager); }
-  const mgrs=Object.values(AM_ROSTER);
-  const load=mgrs.map(m=>{ const o=byOwner[m]||{n:0,v:0,w:0}; return {m, book:book[m]||0, openDeals:o.n, pipeVal:o.v, weighted:o.w}; });
+  const mk=m=>{ const o=byOwner[m]||{n:0,v:0,w:0}; return {m, book:book[m]||0, openDeals:o.n, pipeVal:o.v, weighted:o.w}; };
+  const load=POOL.map(mk);                 // assignment pool only
+  const sideline=Object.keys(SIDELINE).map(mk);
   const pipe=load.some(l=>l.openDeals>0||l.pipeVal>0);
   const maxBook=Math.max(1,...load.map(l=>l.book)), maxVal=Math.max(1,...load.map(l=>l.pipeVal)), maxOpen=Math.max(1,...load.map(l=>l.openDeals));
   // load = 40% client book + 40% open pipeline value + 20% number of open deals (value-weighted capacity)
@@ -3685,19 +3692,24 @@ function renderAssign(){
   const totVal=load.reduce((s,l)=>s+l.pipeVal,0), totDeals=load.reduce((s,l)=>s+l.openDeals,0);
   document.getElementById('pg-assign').innerHTML=`
   <h1 class="ph">Lead <em>Assignment</em></h1>
-  <p class="psub">Who has capacity for the next lead, from each manager's client book and their live open pipeline in Nimble. Load is weighted 40% book, 40% open pipeline value, 20% number of open deals — so a manager sitting on a lot of open value counts as busier than one with the same headcount but an empty pipeline. ${pipe?'':'No open deals are attributed to the roster yet, so this currently balances on book size alone.'} Tell me each manager's sector or region focus and I will fold fit in alongside capacity.</p>
+  <p class="psub">Who in the active sales team has capacity for the next lead, from each manager's client book and their live open pipeline in Nimble. Load is weighted 40% book, 40% open pipeline value, 20% number of open deals, so a manager sitting on a lot of open value counts as busier than one with an empty pipeline. ${pipe?'':'No open deals are attributed to the pool yet, so this currently balances on book size alone.'} Tell me each manager's sector or region focus and I will fold fit in alongside capacity.</p>
   <div class="grid cards">
-    <div class="card"><div class="k">Open pipeline (roster)</div><div class="v">${fmtEk(totVal)}</div><div class="s">${totDeals} deals across the team</div></div>
+    <div class="card"><div class="k">Open pipeline (pool)</div><div class="v">${fmtEk(totVal)}</div><div class="s">${totDeals} deals · ${load.length} active managers</div></div>
     <div class="card hl"><div class="k">Lightest load</div><div class="v pos">${esc(rec.m)}</div><div class="s">next lead goes here</div></div>
     <div class="card"><div class="k">Busiest</div><div class="v">${esc(sorted[sorted.length-1].m)}</div><div class="s">most on their plate</div></div>
   </div>
   <div class="panel" style="border-color:rgba(0,160,216,.4)"><h3>Recommendation</h3>
   <div style="font-size:15px;color:#dbe6fb">The next unassigned lead is best placed with <b style="color:var(--blue)">${esc(rec.m)}</b> — lightest combined load at ${rec.book} client${rec.book===1?'':'s'}${pipe?` and ${fmtEk(rec.pipeVal)} of open pipeline across ${rec.openDeals} deal${rec.openDeals===1?'':'s'}`:''}. ${sorted[1]?`Next in line: <b>${esc(sorted[1].m)}</b>.`:''}</div></div>
-  <div class="panel"><h3>Manager capacity</h3><div class="hint">Relative load, lightest first — lower means more room to take on. Combines book size, open pipeline value and open-deal count.</div>
+  <div class="panel"><h3>Assignment pool — capacity</h3><div class="hint">The five active managers eligible for new leads. Relative load, lightest first — lower means more room to take on.</div>
   <div class="chartbox"><canvas id="chAssign"></canvas></div>
   <div class="twrap" style="margin-top:10px"><table><thead><tr><th>Manager</th><th class="num">Active clients</th><th class="num">Open deals</th><th class="num">Open value</th><th class="num">Weighted</th><th class="num">Relative load</th></tr></thead><tbody>
   ${sorted.map(l=>`<tr><td>${esc(l.m)}${l.m===rec.m?' <span class="tag g">recommended</span>':''}</td><td class="num">${l.book}</td><td class="num">${l.openDeals}</td><td class="num">${fmtEk(l.pipeVal)}</td><td class="num">${fmtEk(l.weighted)}</td><td class="num">${Math.round(l.score*100)}%</td></tr>`).join('')}
-  </tbody></table></div></div>`;
+  </tbody></table></div></div>
+  <div class="panel"><h3>Not in the assignment pool</h3><div class="hint">Shown for visibility — their pipeline still counts in the CRM Overview, but they are never recommended for a new lead.</div>
+  <div class="twrap"><table><thead><tr><th>Name</th><th>Reason</th><th class="num">Active clients</th><th class="num">Open deals</th><th class="num">Open value</th></tr></thead><tbody>
+  ${sideline.map(l=>`<tr><td>${esc(l.m)}</td><td class="hint" style="margin:0">${esc(SIDELINE[l.m])}</td><td class="num">${l.book}</td><td class="num">${l.openDeals}</td><td class="num">${fmtEk(l.pipeVal)}</td></tr>`).join('')}
+  </tbody></table></div>
+  <div class="note" style="margin-top:12px">A new sales manager is joining shortly — once they're in Nimble, tell me their name and I'll add them to the assignment pool. Eoghan Johnson and Derek O'Callaghan remain visible for handover but are excluded from new accounts while they wind down.</div></div>`;
   mkChart('chAssign',{type:'bar',data:{labels:sorted.map(l=>l.m),datasets:[{label:'Relative load',data:sorted.map(l=>Math.round(l.score*100)),backgroundColor:sorted.map(l=>l.m===rec.m?'#2fbf71':'#00a0d8')}]},options:{indexAxis:'y',maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{callback:v=>v+'%'}}}}});
 }
 
