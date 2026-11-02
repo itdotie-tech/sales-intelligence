@@ -36,7 +36,7 @@ module.exports = async function (context, req) {
   }
 
   const url = ep.replace(/\/+$/, '') + '/openai/deployments/' + encodeURIComponent(dep) + '/chat/completions?api-version=' + encodeURIComponent(ver);
-  const dataStr = JSON.stringify(data).slice(0, 26000); // keep the prompt bounded
+  const dataStr = JSON.stringify(data).slice(0, 200000); // bounded, but roomy for gpt-4.1-mini's large context
   const payload = {
     messages: [
       { role: 'system', content: SYS },

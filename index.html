@@ -3569,7 +3569,15 @@ function askContext(){
       ctx.period=PERIOD_LABEL[PERIOD];
       ctx.totals={managedITrevenue:Math.round(tMit),overallRevenue:Math.round(tRev),costToServe:Math.round(tCost),managedITmargin:Math.round(tMargin),clientsUnderwater:under,billableHours:Math.round(tB),nonBillableHours:Math.round(tNB),costRatePerHour:COST_RATE};
       ctx.owners=Object.entries(owners).map(([name,v])=>({name,clients:v.clients,managedIT:Math.round(v.managedIT),margin:Math.round(v.margin)})).sort((a,b)=>b.managedIT-a.managedIT);
-      ctx.clients=clients.slice(0,50);
+      ctx.clients=clients;
+      // month-by-month recurring revenue (sum of per-client recurring-equivalent MRR)
+      try{
+        if(typeof M!=='undefined'&&M&&typeof recEqM!=='undefined'&&recEqM){
+          const rbm={}; for(let i=0;i<M.length;i++){ let t=0; for(let c=0;c<NC;c++){ const a=recEqM[c]; if(a&&a[i]!=null)t+=a[i]; } rbm[M[i]]=Math.round(t); }
+          ctx.revenueByMonth=rbm; ctx.lastCompleteMonth=M[lastFullIdx];
+          ctx.revenueByMonthNote='recurring-equivalent revenue (MRR) for each calendar month, keyed YYYY-MM (e.g. "2026-10" is October 2026). Annually billed licences are spread to a monthly equivalent.';
+        }
+      }catch(e){ ctx.revByMonthError=String(e&&e.message||e); }
     }
   }catch(e){ ctx.dataError=String(e&&e.message||e); }
   try{
@@ -3580,7 +3588,7 @@ function askContext(){
       const soon=ds.filter(d=>{ if(!d.closeDate)return false; const dd=(new Date(d.closeDate)-Date.now())/864e5; return dd>=0&&dd<=30; }).sort((a,b)=>(+b.value||0)-(+a.value||0)).slice(0,15)
         .map(d=>({deal:d.title,client:d.account,owner:dealAM(d),value:Math.round(+d.value||0),stage:d.stage,close:d.closeDate?String(d.closeDate).slice(0,10):null}));
       ctx.pipeline={ openValue:Math.round(val), weighted:Math.round(w), openDeals:ds.length, byStage, byOwner, closingSoon:soon,
-        topDeals:[...ds].sort((a,b)=>(+b.value||0)-(+a.value||0)).slice(0,20).map(d=>({deal:d.title,client:d.account,owner:dealAM(d),value:Math.round(+d.value||0),stage:d.stage,probability:d.probability,close:d.closeDate?String(d.closeDate).slice(0,10):null})) };
+        topDeals:[...ds].sort((a,b)=>(+b.value||0)-(+a.value||0)).slice(0,300).map(d=>({deal:d.title,client:d.account,owner:dealAM(d),value:Math.round(+d.value||0),stage:d.stage,probability:d.probability,close:d.closeDate?String(d.closeDate).slice(0,10):null})) };
     }
   }catch(e){ ctx.pipelineError=String(e&&e.message||e); }
   return ctx;
