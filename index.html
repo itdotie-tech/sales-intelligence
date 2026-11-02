@@ -147,6 +147,28 @@ tr:hover td{background:rgba(0,160,216,.06)}
 .srcbadge-wrap .on{background:#2fbf71}.srcbadge-wrap .off{background:#5f6f92}.srcbadge-wrap .warn{background:#f9c20d}
 .srcbadge-wrap .sb b{color:#cdd8ee;font-weight:600}
 .srcbadge-wrap .sb small{color:var(--mut2);display:block;font-size:10px}
+.askfab{position:fixed;right:22px;bottom:22px;z-index:80;display:flex;align-items:center;gap:9px;background:var(--blue);color:#06263a;border:none;border-radius:999px;padding:12px 18px;font:600 13.5px Roboto,Arial,sans-serif;cursor:pointer;box-shadow:0 10px 30px rgba(0,0,0,.45)}
+.askfab svg{width:18px;height:18px;stroke:#06263a;stroke-width:2;fill:none}
+.askdrawer{position:fixed;top:0;right:0;height:100vh;width:min(440px,96vw);background:var(--navy);border-left:1px solid var(--line);z-index:95;display:flex;flex-direction:column;transform:translateX(100%);transition:transform .22s ease;box-shadow:-20px 0 50px rgba(0,0,0,.45)}
+.askdrawer.on{transform:translateX(0)}
+.askhead{display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--line)}
+.askhead b{font-family:'Archivo Black',Arial,sans-serif;font-size:15px;color:#fff}
+.askhead .x{margin-left:auto;background:none;border:0;color:var(--mut);font-size:22px;cursor:pointer;line-height:1}
+.asklog{flex:1;overflow-y:auto;padding:16px 18px;display:flex;flex-direction:column;gap:12px}
+.askm{max-width:88%;padding:10px 13px;border-radius:12px;font-size:13.5px;line-height:1.5}
+.askm.u{align-self:flex-end;background:var(--blue);color:#06263a;border-bottom-right-radius:4px}
+.askm.a{align-self:flex-start;background:var(--panel);border:1px solid var(--line);color:#dbe6fb;border-bottom-left-radius:4px}
+.askm.a strong{color:#fff}
+.askm.sys{align-self:stretch;max-width:100%;color:var(--mut);font-size:12.5px;background:none;border:none;padding:4px 2px}
+.askfoot{padding:12px 14px;border-top:1px solid var(--line)}
+.asksug{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:9px}
+.asksug button{background:var(--panel);border:1px solid var(--line);color:var(--mut);border-radius:999px;padding:5px 10px;font-size:11.5px;cursor:pointer}
+.asksug button:hover{color:#fff;border-color:var(--blue)}
+.askrow{display:flex;gap:8px}
+.askrow input{flex:1;background:var(--panel);border:1px solid var(--line);color:#fff;border-radius:10px;padding:10px 12px;font-size:13.5px;font-family:inherit}
+.askrow button{background:var(--blue);border:0;color:#06263a;border-radius:10px;padding:0 15px;font-weight:600;cursor:pointer}
+.askrow button:disabled{opacity:.5;cursor:default}
+.asknote{font-size:10.5px;color:var(--mut2);margin-top:8px;text-align:center}
 </style>
 </head>
 <body>
@@ -171,6 +193,16 @@ tr:hover td{background:rgba(0,160,216,.06)}
 <div class="modal-bg" id="settingsBg" onclick="if(event.target===this)closeSettings()"><div class="modal" id="settingsModal"></div></div>
 <div class="modal-bg" id="reportBg" onclick="if(event.target===this)closeReport()"><div class="modal" id="reportModal"></div></div>
 <div class="modal-bg" id="dealBg" onclick="if(event.target===this)closeDealModal()"><div class="modal" id="dealModal"></div></div>
+<button class="askfab" onclick="askOpen()" aria-label="Ask the dashboard"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>Ask</button>
+<div class="askdrawer" id="askDrawer" aria-hidden="true">
+  <div class="askhead"><svg viewBox="0 0 24 24" style="width:18px;height:18px;stroke:var(--blue);stroke-width:1.9;fill:none"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg><b>Ask the Command Centre</b><button class="x" onclick="askClose()" aria-label="Close">&times;</button></div>
+  <div class="asklog" id="askLog"></div>
+  <div class="askfoot">
+    <div class="asksug" id="askSug"></div>
+    <div class="askrow"><input id="askInput" placeholder="Ask about revenue, margins, pipeline…" onkeydown="if(event.key==='Enter')askSend()"><button onclick="askSend()" id="askBtn">Send</button></div>
+    <div class="asknote">Answers are generated from the figures currently loaded in your dashboard.</div>
+  </div>
+</div>
 <style>
 .brtab{display:inline-flex;gap:6px;flex-wrap:wrap;margin:10px 0 0}
 .brtab button{background:var(--panel2);border:1px solid var(--line);color:var(--mut);border-radius:8px;padding:5px 11px;font-size:12px;cursor:pointer}
@@ -3492,6 +3524,67 @@ function crmDealModal(i){
   document.getElementById('dealBg').classList.add('on');
 }
 function closeDealModal(){ const b=document.getElementById('dealBg'); if(b)b.classList.remove('on'); }
+
+/* ================= Ask assistant (Copilot) ================= */
+let _askBusy=false,_askInit=false;
+function askOpen(){ const d=document.getElementById('askDrawer'); d.classList.add('on'); d.setAttribute('aria-hidden','false'); if(!_askInit){_askInit=true;askSeed();} setTimeout(()=>{const i=document.getElementById('askInput');if(i)i.focus();},160); }
+function askClose(){ const d=document.getElementById('askDrawer'); d.classList.remove('on'); d.setAttribute('aria-hidden','true'); }
+function askSeed(){
+  const log=document.getElementById('askLog');
+  log.innerHTML='<div class="askm sys">Ask me about what’s in the dashboard — revenue, Managed IT margins, cost to serve, support, or the sales pipeline. I answer from the figures currently loaded.</div>';
+  const qs=[];
+  if(typeof hasData!=='undefined'&&hasData){ qs.push('Which clients are underwater?','Total Managed IT margin'); }
+  if(typeof hasCrm==='function'&&hasCrm()){ qs.push('Open pipeline by owner','Biggest deals closing soon'); }
+  if(!qs.length) qs.push('What can you tell me?');
+  document.getElementById('askSug').innerHTML=qs.map(q=>`<button onclick="askQuick('${jsq(q)}')">${esc(q)}</button>`).join('');
+}
+function askQuick(q){ const i=document.getElementById('askInput'); i.value=q; askSend(); }
+function askAdd(cls,html){ const log=document.getElementById('askLog'); const d=document.createElement('div'); d.className='askm '+cls; d.innerHTML=html; log.appendChild(d); log.scrollTop=log.scrollHeight; return d; }
+function askFmt(s){ return esc(s).replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/\n/g,'<br>'); }
+async function askSend(){
+  if(_askBusy) return; const i=document.getElementById('askInput'); const q=(i.value||'').trim(); if(!q) return;
+  i.value=''; askAdd('u',esc(q)); const thinking=askAdd('a','<span style="color:var(--mut)">Thinking…</span>');
+  _askBusy=true; const b=document.getElementById('askBtn'); if(b)b.disabled=true;
+  try{
+    const r=await fetch('/api/ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q,context:askContext()})});
+    const d=await r.json().catch(()=>({answer:'Sorry, I could not read the response.'}));
+    thinking.innerHTML=askFmt(d.answer||'(no answer)');
+  }catch(e){ thinking.innerHTML='Could not reach the assistant. '+esc(String(e&&e.message||e)); }
+  finally{ _askBusy=false; if(b)b.disabled=false; const log=document.getElementById('askLog'); log.scrollTop=log.scrollHeight; }
+}
+/* snapshot of the live computed figures sent to /api/ask for grounding */
+function askContext(){
+  const ctx={ generatedAt:new Date().toISOString(), currency:'EUR', dashboard:'IT.ie Command Centre' };
+  try{
+    if(typeof hasData!=='undefined'&&hasData&&typeof META!=='undefined'){
+      const months=periodMonths(); const dc=window.DEVICE_COUNTS||{};
+      let tRev=0,tMit=0,tCost=0,tMargin=0,under=0,tB=0,tNB=0; const owners={}; const clients=[];
+      for(let i=0;i<NC0;i++){ const m=META[i]; if(!isClient(m))continue;
+        const s=supOf(m.n); const rev=totMRR(m)*months, mit=supportMRR(m)*months, cost=s.hoursNonBill*COST_RATE, margin=mit-cost;
+        tRev+=rev; tMit+=mit; tCost+=cost; tMargin+=margin; tB+=s.hoursBill; tNB+=s.hoursNonBill; if(mit>0&&margin<0)under++;
+        const o=ownerOf(m.n)||'Unassigned'; const ow=owners[o]=owners[o]||{clients:0,managedIT:0,margin:0}; ow.clients++; ow.managedIT+=mit; ow.margin+=margin;
+        clients.push({name:m.n,owner:o,devices:(dc[m.n]||0),managedIT:Math.round(mit),overallRevenue:Math.round(rev),billableHrs:Math.round(s.hoursBill),nonBillableHrs:Math.round(s.hoursNonBill),cost:Math.round(cost),margin:Math.round(margin),marginPct:mit>0?Math.round(margin/mit*100):null});
+      }
+      clients.sort((a,b)=>b.managedIT-a.managedIT);
+      ctx.period=PERIOD_LABEL[PERIOD];
+      ctx.totals={managedITrevenue:Math.round(tMit),overallRevenue:Math.round(tRev),costToServe:Math.round(tCost),managedITmargin:Math.round(tMargin),clientsUnderwater:under,billableHours:Math.round(tB),nonBillableHours:Math.round(tNB),costRatePerHour:COST_RATE};
+      ctx.owners=Object.entries(owners).map(([name,v])=>({name,clients:v.clients,managedIT:Math.round(v.managedIT),margin:Math.round(v.margin)})).sort((a,b)=>b.managedIT-a.managedIT);
+      ctx.clients=clients.slice(0,50);
+    }
+  }catch(e){ ctx.dataError=String(e&&e.message||e); }
+  try{
+    if(typeof hasCrm==='function'&&hasCrm()&&typeof allDeals==='function'){
+      const ds=allDeals(); const byStage={},byOwner={}; let val=0,w=0;
+      ds.forEach(d=>{ val+=(+d.value||0); w+=crmWeighted(d); const st=d.stage||'Unstaged'; (byStage[st]=byStage[st]||{deals:0,value:0}); byStage[st].deals++; byStage[st].value+=(+d.value||0); const o=dealAM(d); (byOwner[o]=byOwner[o]||{deals:0,value:0}); byOwner[o].deals++; byOwner[o].value+=(+d.value||0); });
+      Object.values(byStage).forEach(v=>v.value=Math.round(v.value)); Object.values(byOwner).forEach(v=>v.value=Math.round(v.value));
+      const soon=ds.filter(d=>{ if(!d.closeDate)return false; const dd=(new Date(d.closeDate)-Date.now())/864e5; return dd>=0&&dd<=30; }).sort((a,b)=>(+b.value||0)-(+a.value||0)).slice(0,15)
+        .map(d=>({deal:d.title,client:d.account,owner:dealAM(d),value:Math.round(+d.value||0),stage:d.stage,close:d.closeDate?String(d.closeDate).slice(0,10):null}));
+      ctx.pipeline={ openValue:Math.round(val), weighted:Math.round(w), openDeals:ds.length, byStage, byOwner, closingSoon:soon,
+        topDeals:[...ds].sort((a,b)=>(+b.value||0)-(+a.value||0)).slice(0,20).map(d=>({deal:d.title,client:d.account,owner:dealAM(d),value:Math.round(+d.value||0),stage:d.stage,probability:d.probability,close:d.closeDate?String(d.closeDate).slice(0,10):null})) };
+    }
+  }catch(e){ ctx.pipelineError=String(e&&e.message||e); }
+  return ctx;
+}
 function crmReport(){
   const ds=crmFilteredDeals();
   const head=['Deal','Client','Owner','Stage','Pipeline','Value','Weighted','Probability%','CloseDate','AgeDays','LastContactDays'];
