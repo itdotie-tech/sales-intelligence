@@ -2941,6 +2941,21 @@ function supOf(name){ return supportByClient(PERIOD)[name]||{hours:0,hoursNonBil
 function costToServe(m){ return supOf(m.n).hoursNonBill*COST_RATE; }
 function marginOf(m){ return totMRR(m)*periodMonths()-costToServe(m); }
 window.setCostRate=function(v){ COST_RATE=Math.max(1,+v||70); if(state.page==='risk')renderRisk(); else if(state.page==='ops')renderOps(); };
+function workTypeExplainer(){ return `<details class="panel" style="margin:0 0 14px"><summary style="cursor:pointer;font-weight:600">What counts as Billable vs Non-Billable? <span class="hint" style="margin:0;font-weight:400">— how support hours drive the Managed IT margin</span></summary>
+  <div class="two" style="margin-top:12px">
+    <div>
+      <h3 style="color:#2fbf71;margin-bottom:4px">Billable — Timesheet (recovered)</h3>
+      <div class="hint" style="margin:0 0 8px">Work charged to the client <b>on top</b> of the Managed IT fee and recovered on timesheet. It is <b>not</b> a cost to serve, so it is excluded from the margin cost and shown for context only.</div>
+      <div style="font-size:13px;color:#cdd8ee;line-height:1.7">Add-Remove-Changes · <b>Quoted / Project Work</b> · Emergency / After-Hours Support · Billable Work · Remote Support (Billable) · Onsite Support (Billable) · Project Task · 3rd Party Software Support · New Installation</div>
+    </div>
+    <div>
+      <h3 style="color:#f9c20d;margin-bottom:4px">Non-Billable — Cost to serve</h3>
+      <div class="hint" style="margin:0 0 8px">Work <b>absorbed into the Managed IT fee</b> — not re-charged. These hours × €${COST_RATE}/hr are the cost that sets each client's Managed IT margin.</div>
+      <div style="font-size:13px;color:#cdd8ee;line-height:1.7">Remote Support (Contract) · Onsite Support (Contract) · Non-Billable Support · <b>Maintenance</b> · Checklists · Checking Backups · CSP Licenses · CSP Service Provisioning · plus internal time (Travel, Training, Meetings, Admin, Research, Leave, Sales)</div>
+    </div>
+  </div>
+  <div class="hint" style="margin:12px 0 0">Updated Nov 2026: <b>Quoted / Project Work</b> is now billable (additional revenue / sales), and <b>Maintenance</b> is now a non-billable cost to serve.</div>
+  </details>`; }
 window.setPeriod=function(p){ if(['w12','ytd','y3'].includes(p)){ PERIOD=p; if(state.page==='risk')renderRisk(); else if(state.page==='ops')renderOps(); } };
 
 /* ---- Autotask owners resolved to clients (sales owner preferred; technical owner kept) ---- */
@@ -3000,6 +3015,7 @@ function renderRisk(){
   el.innerHTML=`
   <h1 class="ph">Profitability <em>&amp; Risk</em></h1>
   <p class="psub">The <b>Managed IT P&amp;L</b> per client: Managed IT revenue (MIT + Remote MIT) against the cost of delivering it. Cost to serve = <b>non-billable</b> support hours from Autotask at €${COST_RATE}/hr. <b>Billable</b> hours are charged to the client on top (recovered on timesheet) so they're excluded from cost — shown for context. Overall revenue is shown for context.</p>
+  ${workTypeExplainer()}
   <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:6px 0 14px">
     <div style="display:flex;gap:6px">${pbtn('w12')}${pbtn('ytd')}${pbtn('y3')}</div>
     <label style="font-size:13px;color:var(--mut)">€/hour <input type="number" min="1" value="${COST_RATE}" onchange="setCostRate(this.value)" style="width:80px;margin-left:6px;background:var(--panel);border:1px solid var(--line);color:#fff;border-radius:7px;padding:6px 9px"></label>
@@ -3062,6 +3078,7 @@ function renderOps(){
   el.innerHTML=`
   <h1 class="ph">Operations <em>· Autotask</em></h1>
   <p class="psub">The service side of the business — the estate under management and the support effort it generates. Devices synced ${dsync}; support synced ${ssync}. Tickets exclude automated monitoring and internal work.${sup?'':' <b>Support feed not loaded.</b>'}</p>
+  ${workTypeExplainer()}
   <div style="display:flex;gap:6px;margin:6px 0 14px">${pbtn('w12')}${pbtn('ytd')}${pbtn('y3')}</div>
   <div class="cards">
     <div class="card"><div class="k">Managed devices</div><div class="v">${devTot.toLocaleString()}</div><div class="s">${window.DEVICE_COUNTS?Object.keys(window.DEVICE_COUNTS).length:0} sites</div></div>
