@@ -904,7 +904,43 @@ const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>
 const jsq=s=>esc(s).replace(/'/g,"\\'");
 function monthLabel(m){const[y,mo]=m.split('-');return['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+mo-1]+' '+y.slice(2);}
 const charts={};
-function mkChart(id,cfg){if(charts[id])charts[id].destroy();const el=document.getElementById(id);if(!el)return;charts[id]=new Chart(el,cfg);}
+/* draws the value on top of each bar; for stacked bars it draws the stack TOTAL.
+   enabled per-chart by passing a formatter as the 3rd arg to mkChart. */
+const _valueLabelsPlugin={ id:'valueLabels',
+  afterDatasetsDraw(chart,args,opts){
+    if(!opts||chart.config.type!=='bar') return;
+    const fmt=(typeof opts.formatter==='function')?opts.formatter:(v=>Math.round(v).toLocaleString());
+    const o=chart.options||{}, horiz=o.indexAxis==='y';
+    const stacked=!!(o.scales&&((horiz?o.scales.y:o.scales.x)||{}).stacked);
+    const ctx=chart.ctx, sc=chart.scales;
+    ctx.save(); ctx.font='600 10.5px Roboto,Arial,sans-serif'; ctx.fillStyle=opts.color||'#dbe6fb';
+    try{
+      if(stacked){
+        const m0=chart.getDatasetMeta(0); if(!m0||!m0.data){ctx.restore();return;}
+        for(let i=0;i<m0.data.length;i++){
+          let sum=0; chart.data.datasets.forEach((d,di)=>{ if(chart.getDatasetMeta(di).hidden||d.type==='line')return; sum+=(+d.data[i]||0); });
+          if(opts.skipZero&&!sum)continue; const el=m0.data[i]; if(!el)continue;
+          if(horiz){ ctx.textAlign='left'; ctx.textBaseline='middle'; ctx.fillText(fmt(sum), sc.x.getPixelForValue(sum)+4, el.y); }
+          else { ctx.textAlign='center'; ctx.textBaseline='bottom'; ctx.fillText(fmt(sum), el.x, sc.y.getPixelForValue(sum)-4); }
+        }
+      } else {
+        chart.data.datasets.forEach((d,di)=>{ if(chart.getDatasetMeta(di).hidden||d.type==='line')return;
+          (chart.getDatasetMeta(di).data||[]).forEach((el,i)=>{ const v=+d.data[i]||0; if(opts.skipZero&&!v)return;
+            if(horiz){ ctx.textAlign='left'; ctx.textBaseline='middle'; ctx.fillText(fmt(v), el.x+4, el.y); }
+            else { ctx.textAlign='center'; ctx.textBaseline='bottom'; ctx.fillText(fmt(v), el.x, el.y-4); } });
+        });
+      }
+    }catch(e){}
+    ctx.restore();
+  } };
+function mkChart(id,cfg,lbl){
+  if(charts[id])charts[id].destroy(); const el=document.getElementById(id); if(!el)return;
+  if(lbl){ cfg.options=cfg.options||{}; cfg.options.plugins=cfg.options.plugins||{};
+    cfg.options.plugins.valueLabels={formatter:(typeof lbl==='function'?lbl:fmtEk),skipZero:true,color:'#cdd8ee'};
+    cfg.options.layout=cfg.options.layout||{}; cfg.options.layout.padding=Object.assign({top:18},cfg.options.layout.padding||{});
+    cfg.plugins=(cfg.plugins||[]).concat([_valueLabelsPlugin]); }
+  charts[id]=new Chart(el,cfg);
+}
 if(window.Chart){Chart.defaults.color='#8ea0c0';Chart.defaults.borderColor='rgba(255,255,255,.07)';Chart.defaults.font.family='Roboto,Arial,sans-serif';}
 const PALETTE=['#00a0d8','#f9c20d','#2fbf71','#8e6cf0','#e5484d','#39c6c0','#f28c3b','#c6d84d','#e06ec4','#6b8afd','#9aa5b1','#57d0fa'];
 const SVC_LABEL={MIT:'Managed IT',RMIT:'Remote Managed IT',M365:'Microsoft 365',Azure:'Azure',
@@ -1055,7 +1091,7 @@ function buildFbar(){
     <div class="fdrop"><input type="text" id="fClient" placeholder="Search client…" autocomplete="off"><div class="dd" id="fClientDD"></div></div>
     <div class="vr"></div>
     <span class="chip" data-r="cur">Current</span><span class="chip" data-r="lastm">Last month</span>
-    <span class="chip" data-r="lastq">Last quarter</span><span class="chip" data-r="ytd">This year</span>
+    <span class="chip" data-r="lastq">Last quarter</span><span class="chip" data-r="ytd">This FY</span>
     <span class="chip on" data-r="ttm">Last 12M</span><span class="chip" data-r="all">All</span>
     <input type="month" id="fFrom" title="From"><input type="month" id="fTo" title="To">
     <div class="vr"></div><span class="lbl">vs</span>
@@ -1089,7 +1125,7 @@ function applyPreset(r){
   if(r==='cur'){state.m0=state.m1=lf;}
   else if(r==='lastm'){state.m0=state.m1=Math.max(0,lf-1);}
   else if(r==='lastq'){state.m0=Math.max(0,lf-2);state.m1=lf;}
-  else if(r==='ytd'){const i=M.indexOf(y+'-01');state.m0=i>=0?i:0;state.m1=lf;}
+  else if(r==='ytd'){state.m0=fyStartIdx(lf);state.m1=lf;}
   else if(r==='ttm'){state.m0=Math.max(0,lf-11);state.m1=lf;}
   else {state.m0=0;state.m1=NM-1;}
 }
@@ -1202,7 +1238,7 @@ function renderFin(){
       return `<tr><td>${SVC_LABEL[S[si]]||S[si]}</td><td class="num">${fmtE(cur)}</td><td class="num ${cur-p>=0?'pos':'neg'}">${p?fmtP((cur-p)/p):'—'}</td><td class="num ${cur-y>=0?'pos':'neg'}">${y?fmtP((cur-y)/y):'—'}</td><td class="num">${fmtE(t)}</td></tr>`;}).join('')}
     </tbody></table></div></div>
   </div>`;
-  mkChart('chStack',{type:'bar',data:{labels:L,datasets:ds},options:{maintainAspectRatio:false,plugins:{legend:{position:'top',labels:{boxWidth:11,font:{size:11}}}},scales:{x:{stacked:true},y:{stacked:true,ticks:{callback:fmtEk}}}}});
+  mkChart('chStack',{type:'bar',data:{labels:L,datasets:ds},options:{maintainAspectRatio:false,plugins:{legend:{position:'top',labels:{boxWidth:11,font:{size:11}}}},scales:{x:{stacked:true},y:{stacked:true,ticks:{callback:fmtEk}}}},fmtEk);
   mkChart('chRN',{type:'line',data:{labels:L,datasets:[{label:'Recurring',data:L.map((_,k)=>totR[state.m0+k]),borderColor:'#00a0d8',backgroundColor:'rgba(0,160,216,.15)',fill:true,tension:.3,pointRadius:0},{label:'Non-recurring',data:L.map((_,k)=>totN[state.m0+k]),borderColor:'#f9c20d',tension:.3,pointRadius:0}]},options:{maintainAspectRatio:false,plugins:{legend:{position:'top'}},scales:{y:{ticks:{callback:fmtEk}}}}});
 }
 /* ===== KPIs ===== */
@@ -2935,8 +2971,14 @@ function renderMultiSite(){
 /* ================= Autotask support → cost-to-serve ================= */
 let COST_RATE=85;                 // loaded engineer €/hour
 let PERIOD='w12';                 // w12 | ytd | y3
-const PERIOD_LABEL={w12:'Last 12 months',ytd:'This year',y3:'Last 3 years'};
-function periodMonths(){ return PERIOD==='w12'?12:PERIOD==='y3'?36:(new Date().getMonth()+1); }
+const PERIOD_LABEL={w12:'Last 12 months',ytd:'This financial year',y3:'Last 3 years'};
+/* Financial year runs 1 March – end February. fyStartIdx returns the index of the
+   most recent March at/before the given month; fyMonths counts months since then. */
+function fyStartIdx(idx){ if(idx==null)idx=lastFullIdx; const key=M&&M[idx]; if(!key)return 0;
+  const y=+key.slice(0,4), mo=+key.slice(5,7), sy=mo>=3?y:y-1, sk=sy+'-03';
+  let i=M.indexOf(sk); if(i<0){ for(let j=0;j<M.length;j++){ if(M[j]>=sk){i=j;break;} } if(i<0)i=0; } return i; }
+function fyMonths(idx){ if(idx==null)idx=lastFullIdx; return (idx-fyStartIdx(idx))+1; }
+function periodMonths(){ return PERIOD==='w12'?12:PERIOD==='y3'?36:fyMonths(lastFullIdx); }
 let _SUPIX={},_SUPIX_TOK=null;    // memoised support-by-client, per window
 /* One client row from the support feed → {hours,tickets,reopened} for a window.
    New feed has w12/ytd/y3 objects; the older flat feed is treated as 12 months. */
@@ -3578,6 +3620,7 @@ function askContext(){
           ctx.revenueByMonthNote='recurring-equivalent revenue (MRR) for each calendar month, keyed YYYY-MM (e.g. "2026-10" is October 2026). Annually billed licences are spread to a monthly equivalent.';
         }
       }catch(e){ ctx.revByMonthError=String(e&&e.message||e); }
+      try{ ctx.financialYear={ definition:'the financial year runs 1 March to end of February; "this year"/YTD means the current financial year', startMonth:(M?M[fyStartIdx(lastFullIdx)]:null), monthsElapsedThisFY:fyMonths(lastFullIdx) }; }catch(e){}
     }
   }catch(e){ ctx.dataError=String(e&&e.message||e); }
   try{
