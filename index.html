@@ -723,12 +723,14 @@ pbLoad();
 const DEFAULT_RENAME={'DSPCA':'NSPCA'};
 let CLIENT_RENAME={...DEFAULT_RENAME};
 let OWNER_ID_MAP_OVR={};
+let SITE_SPLIT={};
 let MAP_UPLOAD=null;
 try{
   const g=k=>{const v=localStorage.getItem(k);return v?JSON.parse(v):null;};
   const r=g('itie3_rates'); if(r)RATES={...DEFAULT_RATES,...r};
   const o=g('itie3_owner'); if(o)OWNER_OVR=o;
   const oid=g('itie3_ownerid'); if(oid)OWNER_ID_MAP_OVR=oid;
+  const sp=g('itie3_split'); if(sp)SITE_SPLIT=sp;
   try{ const dcv=localStorage.getItem('itie3_devices'); if(dcv)window.DEVICE_COUNTS=JSON.parse(dcv); }catch(e){}
   try{ const mu=localStorage.getItem('itie3_mapupload'); if(mu)MAP_UPLOAD=JSON.parse(mu); }catch(e){}
   const c=g('itie3_custom'); if(c)CUSTOM_SVC=c;
@@ -2850,7 +2852,7 @@ function multiSiteGroups(){
     if(g){ (groups[g]=groups[g]||{same:false,rows:[]}).rows.push({mapped:mp,ns,at,nb}); }
     else { (byMapped[mp]=byMapped[mp]||[]).push({mapped:mp,ns,at,nb}); } });
   Object.keys(byMapped).forEach(mp=>{ if(byMapped[mp].length>1) groups[mp]={same:true,rows:byMapped[mp]}; });
-  Object.keys(groups).forEach(g=>{ if(groups[g].rows.length<2) delete groups[g]; });
+  Object.keys(groups).forEach(g=>{ if(groups[g].rows.length<2||SITE_SPLIT[g]) delete groups[g]; });
   return Object.keys(groups).map(g=>{ const G=groups[g], same=G.same;
     const sites=G.rows.map(s=>{ const devices=(dev[s.at]!=null?dev[s.at]:(dev[s.mapped]!=null?dev[s.mapped]:0))||0;
       let site,mrr=0,owner='';
@@ -2868,11 +2870,16 @@ function multiSiteGroups(){
     return {g,sites,mrr,devices,billing,deviceOnly,owners};
   }).sort((a,b)=>b.devices-a.devices||b.mrr-a.mrr);
 }
+function splitSite(g){ SITE_SPLIT[g]=true; try{localStorage.setItem('itie3_split',JSON.stringify(SITE_SPLIT));}catch(e){} pushOverride({siteSplits:{[g]:true}}); renderMultiSite(); }
+function unsplitSite(g){ delete SITE_SPLIT[g]; try{localStorage.setItem('itie3_split',JSON.stringify(SITE_SPLIT));}catch(e){} pushOverride({siteSplits:{[g]:null}}); renderMultiSite(); }
 function renderMultiSite(){
   const el=document.getElementById('pg-multisite');
   const groups=multiSiteGroups();
   const devLoaded=!!window.DEVICE_COUNTS;
-  if(!groups.length){ el.innerHTML='<h1 class="ph">Multi-<em>Site Clients</em></h1><div class="note">No multi-site groups found in the current mapping. These are picked up from Mapped Names like "Bright Motor Group - Cupra". Load the mapping (built in or uploaded) and, for device figures, the Site device count CSV.</div>'; return; }
+  const splitList=Object.keys(SITE_SPLIT).filter(g=>SITE_SPLIT[g]).sort();
+  const splitSection=splitList.length?`<div class="panel"><h3>Split groups — treated as separate clients</h3><div class="hint">These detected groups are hidden from the grouping above and their sites count as independent clients. Restore any to see it grouped again.</div>
+  <div class="twrap" style="margin-top:8px"><table><tbody>${splitList.map(g=>`<tr><td>${esc(g)}</td><td style="text-align:right"><button class="btn ghost sm" onclick="unsplitSite('${jsq(g)}')">Restore grouping</button></td></tr>`).join('')}</tbody></table></div></div>`:'';
+  if(!groups.length){ el.innerHTML=`<h1 class="ph">Multi-<em>Site Clients</em></h1>${splitList.length?'':'<div class="note">No multi-site groups found in the current mapping. These are picked up from Mapped Names like "Bright Motor Group - Cupra". Load the mapping (built in or uploaded) and, for device figures, the Site device count CSV.</div>'}${splitSection}`; return; }
   const tGroups=groups.length, tSites=groups.reduce((a,g)=>a+g.sites.length,0), tDev=groups.reduce((a,g)=>a+g.devices,0), tMRR=groups.reduce((a,g)=>a+g.mrr,0), tDevOnly=groups.reduce((a,g)=>a+g.deviceOnly,0);
   el.innerHTML=`<h1 class="ph">Multi-<em>Site Clients</em></h1>
   <p class="psub">Groups like Bright Motor Group, EMEIS and EWL seen as a whole and site by site. Revenue comes from NetSuite where a site is billing; device counts come from the Site device count file. Sites holding devices but not yet billing are migration and upsell opportunities.${devLoaded?'':' Load the Site device count CSV on the Data Hub to see devices.'}</p>
@@ -2884,11 +2891,13 @@ function renderMultiSite(){
     <div class="card ${tDevOnly?'hl':''}"><div class="k">Sites not yet billing</div><div class="v ${tDevOnly?'warn':''}">${devLoaded?tDevOnly:'—'}</div><div class="s">devices, no revenue</div></div>
   </div>
   ${groups.map(g=>`<div class="panel"><div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap"><h3 style="margin:0">${esc(g.g)}</h3>
-    <span class="hint" style="margin:0">${g.sites.length} sites · ${g.billing} billing · ${g.deviceOnly} device-only${devLoaded?' · '+g.devices.toLocaleString()+' devices':''} · ${fmtE(g.mrr)}/mo${g.owners.length?' · '+esc(g.owners.join(', ')):''}</span></div>
+    <span class="hint" style="margin:0">${g.sites.length} sites · ${g.billing} billing · ${g.deviceOnly} device-only${devLoaded?' · '+g.devices.toLocaleString()+' devices':''} · ${fmtE(g.mrr)}/mo${g.owners.length?' · '+esc(g.owners.join(', ')):''}</span>
+    <button class="btn ghost sm" style="margin-left:auto" onclick="splitSite('${jsq(g.g)}')">Split into separate clients</button></div>
     <div class="twrap" style="max-height:320px;margin-top:8px"><table><thead><tr><th>Site</th><th>Owner</th><th class="num">Devices</th><th class="num">MRR</th><th class="num">€/device</th><th>Status</th></tr></thead><tbody>
     ${g.sites.map(s=>`<tr><td>${esc(s.site)}</td><td>${esc(s.owner||'—')}</td><td class="num">${s.devices||'—'}</td><td class="num">${s.mrr?fmtE(s.mrr):'—'}</td><td class="num">${(s.mrr&&s.devices)?'€'+(s.mrr/s.devices).toFixed(0):'—'}</td><td>${s.billing?'<span class="pos">Billing</span>':(s.devices>0?'<span class="warn">Devices only</span>':'<span class="hint" style="margin:0">Not billing</span>')}</td></tr>`).join('')}
     <tr style="border-top:2px solid var(--line);font-weight:700"><td>Group total</td><td></td><td class="num">${g.devices||'—'}</td><td class="num">${fmtE(g.mrr)}</td><td class="num">${(g.mrr&&g.devices)?'€'+(g.mrr/g.devices).toFixed(0):'—'}</td><td></td></tr>
-    </tbody></table></div></div>`).join('')}`;
+    </tbody></table></div></div>`).join('')}
+  ${splitSection}`;
 }
 
 /* ================= Autotask support → cost-to-serve ================= */
@@ -3247,6 +3256,7 @@ async function loadCentralOverrides(){
     if(d.clientRenames&&d.clientRenames['__matchNotes__']!=null){ window.__matchNotes=d.clientRenames['__matchNotes__']; }
     Object.assign(OWNER_ID_MAP_OVR, d.ownerIdMap||{});
     Object.assign(SOT_OVR, d.sourceOfTruth||{});
+    if(d.siteSplits&&typeof d.siteSplits==='object'){ Object.keys(d.siteSplits).forEach(k=>{ if(d.siteSplits[k])SITE_SPLIT[k]=true; else delete SITE_SPLIT[k]; }); try{localStorage.setItem('itie3_split',JSON.stringify(SITE_SPLIT));}catch(e){} }
     CENTRAL_META={updatedAt:d.updatedAt||null,updatedBy:d.updatedBy||null,synced:true};
     try{ localStorage.setItem('itie3_owner',JSON.stringify(OWNER_OVR));
          localStorage.setItem('itie3_crm_xwalk',JSON.stringify(CRM_XWALK));
