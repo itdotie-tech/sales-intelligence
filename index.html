@@ -1238,7 +1238,7 @@ function renderFin(){
       return `<tr><td>${SVC_LABEL[S[si]]||S[si]}</td><td class="num">${fmtE(cur)}</td><td class="num ${cur-p>=0?'pos':'neg'}">${p?fmtP((cur-p)/p):'—'}</td><td class="num ${cur-y>=0?'pos':'neg'}">${y?fmtP((cur-y)/y):'—'}</td><td class="num">${fmtE(t)}</td></tr>`;}).join('')}
     </tbody></table></div></div>
   </div>`;
-  mkChart('chStack',{type:'bar',data:{labels:L,datasets:ds},options:{maintainAspectRatio:false,plugins:{legend:{position:'top',labels:{boxWidth:11,font:{size:11}}}},scales:{x:{stacked:true},y:{stacked:true,ticks:{callback:fmtEk}}}},fmtEk);
+  mkChart('chStack',{type:'bar',data:{labels:L,datasets:ds},options:{maintainAspectRatio:false,plugins:{legend:{position:'top',labels:{boxWidth:11,font:{size:11}}}},scales:{x:{stacked:true},y:{stacked:true,ticks:{callback:fmtEk}}}}},fmtEk);
   mkChart('chRN',{type:'line',data:{labels:L,datasets:[{label:'Recurring',data:L.map((_,k)=>totR[state.m0+k]),borderColor:'#00a0d8',backgroundColor:'rgba(0,160,216,.15)',fill:true,tension:.3,pointRadius:0},{label:'Non-recurring',data:L.map((_,k)=>totN[state.m0+k]),borderColor:'#f9c20d',tension:.3,pointRadius:0}]},options:{maintainAspectRatio:false,plugins:{legend:{position:'top'}},scales:{y:{ticks:{callback:fmtEk}}}}});
 }
 /* ===== KPIs ===== */
