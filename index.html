@@ -1051,6 +1051,7 @@ const PAGES=[
  ['c360','Client 360','M10 10a4 4 0 100-8 4 4 0 000 8zm-7 8a7 7 0 0114 0',2],
  ['risk','Profitability & Risk','M10 3v14M5 7l5-4 5 4M3 11a2 2 0 004 0M13 11a2 2 0 004 0',2],
  ['ops','Operations · Autotask','M10 7a3 3 0 100 6 3 3 0 000-6zM10 2v2M10 16v2M3 10h2M15 10h2',2],
+ ['tickets','Tickets · Autotask','M4 5h12v3H4zM4 10h12v3H4zM4 15h8v2H4',2],
  ['quality','Data Quality','M10 2a8 8 0 100 16 8 8 0 000-16zM10 6v5M10 14h.01',4],
  ['price','Pricing Health','M10 2v16M6 6h6a3 3 0 010 6H7a3 3 0 000 6h7',0],
  ['gap','Gap Analysis','M3 3h6v6H3zM11 3h6v6h-6zM3 11h6v6H3zM11 11h6v6h-6z',0],
@@ -3154,7 +3155,14 @@ function renderOps(){
   const iss={};
   if(sup&&Array.isArray(sup.clients)) for(const c of sup.clients) for(const it of (Array.isArray(c.topIssues)?c.topIssues:[])){ const g=iss[it.type]=iss[it.type]||{tickets:0,hours:0}; g.tickets+=+it.tickets||0; g.hours+=+it.hours||0; }
   const issRows=Object.entries(iss).map(([type,v])=>({type,tickets:v.tickets,hours:Math.round(v.hours)})).sort((a,b)=>b.tickets-a.tickets).slice(0,15);
-  const byHrs=sup&&Array.isArray(sup.clients)?[...sup.clients].map(c=>({site:c.site,w:winOf(c,PERIOD)})).sort((a,b)=>b.w.hours-a.w.hours).slice(0,20):[];
+  let byHrs=[];
+  if(sup&&Array.isArray(sup.clients)){
+    const rows=sup.clients.map(c=>({site:(c.site||''),w:winOf(c,PERIOD)}));
+    const pcO={}; rows.forEach(r=>{const i=r.site.indexOf(' - ');if(i>0){const p=r.site.slice(0,i).trim();pcO[p]=(pcO[p]||0)+1;}});
+    const gkO=n=>{const i=n.indexOf(' - ');if(i>0){const p=n.slice(0,i).trim();if(pcO[p]>=2)return p;}return n;};
+    const gmO={}; rows.forEach(r=>{const k=gkO(r.site);const g=gmO[k]=gmO[k]||{name:k,hours:0,tickets:0,n:0};g.hours+=r.w.hours;g.tickets+=r.w.tickets;g.n++;});
+    byHrs=Object.values(gmO).map(g=>({site:g.name+(g.n>1?' ('+g.n+' sites)':''),hours:Math.round(g.hours*10)/10,tickets:g.tickets})).sort((a,b)=>b.hours-a.hours).slice(0,20);
+  }
   const dsync=window.DEVICE_SOURCE&&window.DEVICE_SOURCE.at?new Date(window.DEVICE_SOURCE.at).toLocaleDateString('en-IE'):'—';
   const ssync=sup&&sup.generatedAt?new Date(sup.generatedAt).toLocaleDateString('en-IE'):'—';
   const pbtn=p=>`<button class="btn ${PERIOD===p?'':'ghost'} sm" onclick="setPeriod('${p}')">${PERIOD_LABEL[p]}</button>`;
@@ -3174,9 +3182,9 @@ function renderOps(){
     <div class="twrap" style="max-height:440px"><table><thead><tr><th>Issue type</th><th class="num">Tickets</th><th class="num">Hours</th></tr></thead><tbody>
     ${issRows.map(r=>`<tr><td>${esc(r.type)}</td><td class="num">${r.tickets.toLocaleString()}</td><td class="num">${r.hours.toLocaleString()}</td></tr>`).join('')||'<tr><td colspan=3 class="hint">No issue data.</td></tr>'}
     </tbody></table></div></div>
-    <div class="panel"><h3>Heaviest clients by hours — ${PERIOD_LABEL[PERIOD].toLowerCase()}</h3><div class="hint">The biggest draws on the service desk — cross-check against revenue on Profitability &amp; Risk.</div>
-    <div class="twrap" style="max-height:440px"><table><thead><tr><th>Client (Autotask name)</th><th class="num">Hours</th><th class="num">Tickets</th></tr></thead><tbody>
-    ${byHrs.map(c=>`<tr><td>${esc(c.site)}</td><td class="num">${c.w.hours.toLocaleString()}</td><td class="num">${c.w.tickets.toLocaleString()}</td></tr>`).join('')||'<tr><td colspan=3 class="hint">No support data.</td></tr>'}
+    <div class="panel"><h3>Heaviest clients by hours — ${PERIOD_LABEL[PERIOD].toLowerCase()}</h3><div class="hint">The biggest draws on the service desk, multi-site clients rolled up — cross-check against revenue on Profitability &amp; Risk.</div>
+    <div class="twrap" style="max-height:440px"><table><thead><tr><th>Client</th><th class="num">Hours</th><th class="num">Tickets</th></tr></thead><tbody>
+    ${byHrs.map(c=>`<tr><td>${esc(c.site)}</td><td class="num">${c.hours.toLocaleString()}</td><td class="num">${c.tickets.toLocaleString()}</td></tr>`).join('')||'<tr><td colspan=3 class="hint">No support data.</td></tr>'}
     </tbody></table></div></div>
   </div>`;
 }
@@ -3290,7 +3298,80 @@ window.exportReconcile=function(){
   for(const s of unmatched.sort()) out.push(['autotask_unmatched','','','','',s,atSales[s]||'']);
   dl(out.map(r=>r.map(q).join(',')).join('\n'),'itie-name-reconciliation.csv','text/csv');
 };
-const RENDER={multisite:renderMultiSite,action:renderAction,ownermap:renderOwnerMap,match:renderMatch,diag:renderDiag,exec:renderExec,radar:renderRadar,fin:renderFin,kpi:renderKpi,c360:renderC360,risk:renderRisk,ops:renderOps,quality:renderQuality,price:renderPrice,gap:renderGap,m365:renderM365,posture:renderPosture,cyber:renderCyber,nis2:renderNis2,win10:renderWin10,pkg:renderPkg,am:renderAm,health:renderHealth,churn:renderChurn,crm:renderCrm,pipeline:renderPipeline,leads:renderLeads,assign:renderAssign,recon:renderRecon,data:renderData};
+function renderTickets(){
+  const el=document.getElementById('pg-tickets');
+  const T=window.TICKETS;
+  if(!T||!Array.isArray(T.sites)||!T.sites.length){
+    el.innerHTML='<h1 class="ph">Tickets <em>· Autotask</em></h1><div class="note"><b>No ticket feed yet.</b> This page reads <code>autotask-tickets.json</code> from storage — run the Autotask tickets extract on the office device.</div>';
+    return;
+  }
+  const nf=v=>Math.round(+v||0).toLocaleString();
+  const G2='display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px;margin:14px 0';
+  const sites=T.sites;
+  function der(s){ const w=(s.totals&&s.totals.w12)?s.totals.w12:{total:0,user:0,auto:0,hours:0};
+    let reopened=0; for(const m of (s.monthly||[])) reopened+=+m.reopened||0;
+    return {name:s.name||'(unnamed)',total:+w.total||0,user:+w.user||0,auto:+w.auto||0,hours:+w.hours||0,reopened,sla:s.sla||null}; }
+  const D=sites.map(der);
+  // multi-site rollup: group by the prefix before " - " when 2+ sites share it
+  const pc={}; D.forEach(d=>{ const i=d.name.indexOf(' - '); if(i>0){ const p=d.name.slice(0,i).trim(); pc[p]=(pc[p]||0)+1; } });
+  const gkey=n=>{ const i=n.indexOf(' - '); if(i>0){ const p=n.slice(0,i).trim(); if(pc[p]>=2) return p; } return n; };
+  const groups={};
+  D.forEach(d=>{ const k=gkey(d.name); const g=groups[k]=groups[k]||{name:k,sites:[],total:0,user:0,auto:0,hours:0,reopened:0,met:0,miss:0,frW:0,frN:0,resW:0,resN:0};
+    g.sites.push(d); g.total+=d.total; g.user+=d.user; g.auto+=d.auto; g.hours+=d.hours; g.reopened+=d.reopened;
+    if(d.sla){ g.met+=+d.sla.slaMet||0; g.miss+=+d.sla.slaMissed||0; const wt=d.user||1;
+      if(d.sla.firstResponseAvgHrs!=null){ g.frW+=d.sla.firstResponseAvgHrs*wt; g.frN+=wt; }
+      if(d.sla.resolutionAvgHrs!=null){ g.resW+=d.sla.resolutionAvgHrs*wt; g.resN+=wt; } } });
+  const gArr=Object.values(groups).sort((a,b)=>b.total-a.total);
+  let tTot=0,tUser=0,tAuto=0,tHours=0,sMet=0,sMiss=0,frW=0,frN=0,resW=0,resN=0;
+  gArr.forEach(g=>{ tTot+=g.total;tUser+=g.user;tAuto+=g.auto;tHours+=g.hours;sMet+=g.met;sMiss+=g.miss;frW+=g.frW;frN+=g.frN;resW+=g.resW;resN+=g.resN; });
+  const slaPct=(sMet+sMiss)>0?Math.round(100*sMet/(sMet+sMiss)):null;
+  const frAvg=frN>0?frW/frN:null, resAvg=resN>0?resW/resN:null;
+  const mAgg={}; sites.forEach(s=>{ for(const m of (s.monthly||[])){ const o=mAgg[m.ym]=mAgg[m.ym]||{user:0,auto:0}; o.user+=+m.user||0; o.auto+=+m.auto||0; } });
+  const months=Object.keys(mAgg).sort();
+  const iss=(T.issueTypeAudit||[]).slice(0,12);
+  const src=(T.sources||[]).slice().sort((a,b)=>(+b.tickets||0)-(+a.tickets||0));
+  const engs=(T.engineers||[]).slice(0,12);
+  el.innerHTML=`
+  <h1 class="ph">Tickets <em>· Autotask</em></h1>
+  <p class="psub">Human-logged and automated tickets over the last 12 months, with multi-site clients rolled up. Auto = monitoring alerts, alert-type and recurring tickets; User = everything raised by people (email, phone, portal, in person).${T.generatedAt?' Feed generated '+new Date(T.generatedAt).toLocaleDateString()+'.':''}</p>
+  <div class="grid cards">
+    <div class="card hl"><div class="k">Total tickets</div><div class="v">${nf(tTot)}</div><div class="s">last 12 months</div></div>
+    <div class="card"><div class="k">User-generated</div><div class="v">${nf(tUser)}</div><div class="s">${tTot?Math.round(100*tUser/tTot):0}% of total</div></div>
+    <div class="card"><div class="k">Automated</div><div class="v">${nf(tAuto)}</div><div class="s">${tTot?Math.round(100*tAuto/tTot):0}% of total</div></div>
+    <div class="card"><div class="k">Worked hours</div><div class="v">${nf(tHours)}</div><div class="s">logged on tickets</div></div>
+    ${slaPct!=null?`<div class="card"><div class="k">SLA met</div><div class="v ${slaPct<80?'warn':'pos'}">${slaPct}%</div><div class="s">user tickets with an SLA</div></div>`:''}
+    ${frAvg!=null?`<div class="card"><div class="k">Avg first response</div><div class="v">${frAvg.toFixed(1)}h</div><div class="s">user tickets</div></div>`:''}
+    ${resAvg!=null?`<div class="card"><div class="k">Avg resolution</div><div class="v">${resAvg.toFixed(1)}h</div><div class="s">user tickets</div></div>`:''}
+  </div>
+  <div style="${G2}">
+    <div class="panel"><h3>Tickets by month</h3><div class="hint">User vs automated, last 12 months</div><div class="chartbox tall"><canvas id="tkTrend"></canvas></div></div>
+    <div class="panel"><h3>Ticket sources</h3><div class="hint">Where tickets originate (last 12 months)</div><div class="twrap" style="max-height:330px"><table><thead><tr><th>Source</th><th class="num">Tickets</th><th class="num">Auto</th></tr></thead><tbody>${src.map(s=>`<tr><td>${esc(s.name)}</td><td class="num">${nf(s.tickets)}</td><td class="num">${nf(s.auto)}</td></tr>`).join('')||'<tr><td colspan=3 class="hint">No source data.</td></tr>'}</tbody></table></div></div>
+  </div>
+  <div style="${G2}">
+    <div class="panel"><h3>Top ticket types</h3><div class="hint">Issue type (12m), with automated share</div><div class="twrap" style="max-height:360px"><table><thead><tr><th>Type</th><th class="num">Tickets</th><th class="num">% auto</th></tr></thead><tbody>${iss.map(s=>`<tr><td>${esc(s.type)}</td><td class="num">${nf(s.tickets)}</td><td class="num">${s.tickets?Math.round(100*s.auto/s.tickets):0}%</td></tr>`).join('')||'<tr><td colspan=3 class="hint">No type data.</td></tr>'}</tbody></table></div></div>
+    <div class="panel"><h3>Engineers</h3><div class="hint">Tickets assigned &amp; completed (last 12 months)</div><div class="twrap" style="max-height:360px"><table><thead><tr><th>Engineer</th><th class="num">Assigned</th><th class="num">Completed</th><th class="num">Hours</th></tr></thead><tbody>${engs.map(e=>`<tr><td>${esc(e.engineer)}</td><td class="num">${nf(e.totals.assigned)}</td><td class="num">${nf(e.totals.completed)}</td><td class="num">${nf(e.totals.hours)}</td></tr>`).join('')||'<tr><td colspan=4 class="hint">No engineer data.</td></tr>'}</tbody></table></div></div>
+  </div>
+  <div class="panel"><h3>Clients by ticket volume</h3><div class="hint">Multi-site clients are rolled up — click a client marked ▸ to expand its sites. Last 12 months.</div>
+    <div class="twrap" style="max-height:620px"><table><thead><tr><th>Client</th><th class="num">Sites</th><th class="num">Tickets</th><th class="num">User</th><th class="num">Auto</th><th class="num">Hours</th><th class="num">Reopened</th><th class="num">SLA%</th></tr></thead><tbody>
+    ${gArr.map((g,gi)=>{
+      const multi=g.sites.length>1;
+      const sp=(g.met+g.miss)>0?Math.round(100*g.met/(g.met+g.miss)):null;
+      const head=`<tr class="${multi?'clink':''}"${multi?` onclick="tkToggle(${gi})"`:''}><td>${multi?'▸ ':''}${esc(g.name)}</td><td class="num">${g.sites.length}</td><td class="num">${nf(g.total)}</td><td class="num">${nf(g.user)}</td><td class="num">${nf(g.auto)}</td><td class="num">${nf(g.hours)}</td><td class="num">${nf(g.reopened)}</td><td class="num">${sp!=null?sp+'%':'—'}</td></tr>`;
+      const subs=multi?g.sites.slice().sort((a,b)=>b.total-a.total).map(d=>{
+        const dp=d.sla&&((+d.sla.slaMet||0)+(+d.sla.slaMissed||0))>0?Math.round(100*(+d.sla.slaMet||0)/((+d.sla.slaMet||0)+(+d.sla.slaMissed||0))):null;
+        return `<tr data-tkg="${gi}" style="display:none;background:rgba(255,255,255,.02)"><td style="padding-left:22px;color:var(--mut)">${esc(d.name)}</td><td class="num"></td><td class="num">${nf(d.total)}</td><td class="num">${nf(d.user)}</td><td class="num">${nf(d.auto)}</td><td class="num">${nf(d.hours)}</td><td class="num">${nf(d.reopened)}</td><td class="num">${dp!=null?dp+'%':'—'}</td></tr>`;
+      }).join(''):'';
+      return head+subs;
+    }).join('')}
+    </tbody></table></div>
+  </div>`;
+  mkChart('tkTrend',{type:'bar',data:{labels:months,datasets:[
+    {label:'User',data:months.map(k=>mAgg[k].user),backgroundColor:'#00a0d8',stack:'a',borderRadius:3},
+    {label:'Automated',data:months.map(k=>mAgg[k].auto),backgroundColor:'rgba(249,194,13,.85)',stack:'a',borderRadius:3}
+  ]},options:{maintainAspectRatio:false,plugins:{legend:{position:'top'}},scales:{x:{stacked:true},y:{stacked:true,ticks:{precision:0}}}}});
+}
+window.tkToggle=function(gi){ document.querySelectorAll('[data-tkg="'+gi+'"]').forEach(r=>{ r.style.display=(r.style.display==='none')?'':'none'; }); };
+const RENDER={multisite:renderMultiSite,action:renderAction,ownermap:renderOwnerMap,match:renderMatch,diag:renderDiag,exec:renderExec,radar:renderRadar,fin:renderFin,kpi:renderKpi,c360:renderC360,risk:renderRisk,ops:renderOps,tickets:renderTickets,quality:renderQuality,price:renderPrice,gap:renderGap,m365:renderM365,posture:renderPosture,cyber:renderCyber,nis2:renderNis2,win10:renderWin10,pkg:renderPkg,am:renderAm,health:renderHealth,churn:renderChurn,crm:renderCrm,pipeline:renderPipeline,leads:renderLeads,assign:renderAssign,recon:renderRecon,data:renderData};
 
 /* ================= CRM (Nimble) merge layer ================= */
 const AM_ROSTER={DF:'David Flood',DG:'David Groark',DMcD:'David McDonald',DOC:"Derek O'Callaghan",EB:'Emil Badea',EJ:'Eoghan Johnson',SC:'Simon Collins',MD:'Michael Daly',EG:'Eamon Gallagher'};
@@ -3605,13 +3686,45 @@ function askContext(){
         const s=supOf(m.n); const rev=totMRR(m)*months, mit=supportMRR(m)*months, cost=s.hoursNonBill*COST_RATE, margin=mit-cost;
         tRev+=rev; tMit+=mit; tCost+=cost; tMargin+=margin; tB+=s.hoursBill; tNB+=s.hoursNonBill; if(mit>0&&margin<0)under++;
         const o=ownerOf(m.n)||'Unassigned'; const ow=owners[o]=owners[o]||{clients:0,managedIT:0,margin:0}; ow.clients++; ow.managedIT+=mit; ow.margin+=margin;
-        clients.push({name:m.n,owner:o,devices:(dc[m.n]||0),managedIT:Math.round(mit),overallRevenue:Math.round(rev),billableHrs:Math.round(s.hoursBill),nonBillableHrs:Math.round(s.hoursNonBill),cost:Math.round(cost),margin:Math.round(margin),marginPct:mit>0?Math.round(margin/mit*100):null});
+        clients.push({name:m.n,owner:o,devices:(dc[m.n]||0),managedIT:Math.round(mit),overallRevenue:Math.round(rev),billableHrs:Math.round(s.hoursBill),nonBillableHrs:Math.round(s.hoursNonBill),cost:Math.round(cost),margin:Math.round(margin),marginPct:mit>0?Math.round(margin/mit*100):null,tickets:s.tickets,reopened:s.reopened,ticketTypes:(s.topIssues||[]).map(t=>({type:t.type,tickets:t.tickets,hours:t.hours}))});
       }
       clients.sort((a,b)=>b.managedIT-a.managedIT);
       ctx.period=PERIOD_LABEL[PERIOD];
       ctx.totals={managedITrevenue:Math.round(tMit),overallRevenue:Math.round(tRev),costToServe:Math.round(tCost),managedITmargin:Math.round(tMargin),clientsUnderwater:under,billableHours:Math.round(tB),nonBillableHours:Math.round(tNB),costRatePerHour:COST_RATE};
       ctx.owners=Object.entries(owners).map(([name,v])=>({name,clients:v.clients,managedIT:Math.round(v.managedIT),margin:Math.round(v.margin)})).sort((a,b)=>b.managedIT-a.managedIT);
       ctx.clients=clients;
+      // support: per-client tickets + ticket-type mix are on each client (for ctx.period); window totals + scope note here
+      try{
+        const S=window.SUPPORT; const byWin={};
+        if(S&&S.totals){ for(const w of ['w12','ytd','y3']){ const t=S.totals[w]; if(t) byWin[w]={tickets:t.tickets||0,hoursNonBill:(t.hoursNonBill!=null?t.hoursNonBill:(t.hours||0)),hoursBill:t.hoursBill||0}; } }
+        ctx.support={ periodShown:PERIOD_LABEL[PERIOD],
+          note:'Each client carries "tickets", "reopened" and "ticketTypes" for the period shown (ctx.period). ticketTypes is the Autotask issue-type mix (type + ticket count), human-submitted tickets only (automated and internal excluded). To answer for a group such as Emeis, sum tickets across the clients whose name or owner matches that group. windowTotals cover ALL clients per window: w12 = last 12 months, ytd = this financial year, y3 = last 3 years.',
+          monthlyNote:'These support figures are windowed totals + a 12-month issue-type mix. For ticket COUNTS by month, ticket type, auto-vs-user, per client (multi-site rolled up) and per engineer, use ctx.tickets instead.',
+          windowTotals:byWin };
+      }catch(e){ ctx.supportError=String(e&&e.message||e); }
+      // tickets cube (Autotask): month-by-month, auto/user, types, engineers, per client rolled up
+      try{
+        const T=window.TICKETS;
+        if(T&&Array.isArray(T.sites)&&T.sites.length){
+          const D=T.sites.map(s=>{const w=(s.totals&&s.totals.w12)||{total:0,user:0,auto:0,hours:0};let re=0;for(const mm of (s.monthly||[]))re+=+mm.reopened||0;return{name:s.name||'',total:+w.total||0,user:+w.user||0,auto:+w.auto||0,hours:+w.hours||0,reopened:re};});
+          const pcT={};D.forEach(d=>{const i=d.name.indexOf(' - ');if(i>0){const p=d.name.slice(0,i).trim();pcT[p]=(pcT[p]||0)+1;}});
+          const gkT=n=>{const i=n.indexOf(' - ');if(i>0){const p=n.slice(0,i).trim();if(pcT[p]>=2)return p;}return n;};
+          const gmT={};D.forEach(d=>{const k=gkT(d.name);const g=gmT[k]=gmT[k]||{client:k,sites:0,total:0,user:0,auto:0,hours:0,reopened:0};g.sites++;g.total+=d.total;g.user+=d.user;g.auto+=d.auto;g.hours+=Math.round(d.hours);g.reopened+=d.reopened;});
+          const groups=Object.values(gmT).sort((a,b)=>b.total-a.total);
+          let tt=0,tu=0,ta=0,th=0;groups.forEach(g=>{tt+=g.total;tu+=g.user;ta+=g.auto;th+=g.hours;});
+          const mA={};T.sites.forEach(s=>{for(const mm of (s.monthly||[])){const o=mA[mm.ym]=mA[mm.ym]||{total:0,user:0,auto:0};o.total+=+mm.total||0;o.user+=+mm.user||0;o.auto+=+mm.auto||0;}});
+          ctx.tickets={
+            window:'last 12 months',
+            note:'Autotask tickets. auto = monitoring/alert/recurring; user = human-raised (email, phone, portal, in person). byClient is rolled up so multi-site groups (e.g. EMEIS) are one row with a site count. monthlyByMonth is all clients combined, keyed YYYY-MM. byClient is the top 300 clients by volume.',
+            overall:{total:tt,user:tu,auto:ta,workedHours:Math.round(th)},
+            monthlyByMonth:mA,
+            byClient:groups.slice(0,300),
+            topTypes:(T.issueTypeAudit||[]).slice(0,20).map(x=>({type:x.type,tickets:x.tickets,auto:x.auto})),
+            sources:(T.sources||[]).map(x=>({name:x.name,tickets:x.tickets,auto:x.auto})),
+            engineers:(T.engineers||[]).slice(0,25).map(e=>({engineer:e.engineer,assigned:e.totals.assigned,completed:e.totals.completed,hours:e.totals.hours}))
+          };
+        }
+      }catch(e){ ctx.ticketsError=String(e&&e.message||e); }
       // month-by-month recurring revenue (sum of per-client recurring-equivalent MRR)
       try{
         if(typeof M!=='undefined'&&M&&typeof recEqM!=='undefined'&&recEqM){
@@ -4061,6 +4174,24 @@ async function loadAutotaskOwners(){
     }
   }catch(e){}
 }
+async function loadAutotaskTickets(){
+  try{
+    const r=await fetch('/api/getSource/autotask-tickets',{credentials:'include',cache:'no-store'});
+    if(!r.ok) return;
+    const j=await r.json();
+    if(j && (j.sites||j.engineers)){
+      if(!Array.isArray(j.sites)) j.sites=j.sites?[j.sites]:[];
+      if(!Array.isArray(j.engineers)) j.engineers=j.engineers?[j.engineers]:[];
+      for(const s of j.sites){ if(s){ if(!Array.isArray(s.monthly)) s.monthly=s.monthly?[s.monthly]:[]; if(!Array.isArray(s.types)) s.types=s.types?[s.types]:[]; } }
+      for(const e of j.engineers){ if(e&&!Array.isArray(e.monthly)) e.monthly=e.monthly?[e.monthly]:[]; }
+      if(j.sources&&!Array.isArray(j.sources)) j.sources=[j.sources];
+      if(j.ticketTypes&&!Array.isArray(j.ticketTypes)) j.ticketTypes=[j.ticketTypes];
+      if(j.issueTypeAudit&&!Array.isArray(j.issueTypeAudit)) j.issueTypeAudit=[j.issueTypeAudit];
+      window.TICKETS=j;
+      try{ SOURCE_DATA['autotasktickets']={data:j,loadedAt:(j.generatedAt||new Date().toISOString())}; saveSourceData(); }catch(e){}
+    }
+  }catch(e){}
+}
 function _startBuild(){
   if(hasData){
     buildFbar();applyPreset('ttm');syncMonthInputs();go('action');
@@ -4069,7 +4200,7 @@ function _startBuild(){
     buildDataset({source:'feed',silent:true}).then(ok=>{ if(ok) go('action'); });
   }
 }
-Promise.all([loadAutotaskDevices(),loadAutotaskSupport(),loadAutotaskOwners()]).then(_startBuild,_startBuild);
+Promise.all([loadAutotaskDevices(),loadAutotaskSupport(),loadAutotaskOwners(),loadAutotaskTickets()]).then(_startBuild,_startBuild);
 Promise.all(getSources().filter(s=>s.role!=='primary'&&s.id!=='autotask').map(s=>
   fetch(s.url,{credentials:'include',cache:'no-store'}).then(r=>r.ok?r.json():null).then(json=>{
     if(json){ SOURCE_DATA[s.id]={data:json,loadedAt:new Date().toISOString()}; saveSourceData(); return true; }
