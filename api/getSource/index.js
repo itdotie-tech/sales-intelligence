@@ -47,6 +47,14 @@ module.exports = async function (context, req) {
       if (!data) { context.res = { status:404, body:'No Autotask owners file found yet.' }; return; }
       context.res = { headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) }; return;
     }
+    if (id === 'autotask-tickets') {
+      // Per-site ticket cube (monthly counts, auto/user split, issue types, SLA,
+      // and per-engineer stats), written by the office tickets extract.
+      const { readJsonBlob } = require('../shared/store');
+      const data = await readJsonBlob('autotask-tickets.json');
+      if (!data) { context.res = { status:404, body:'No Autotask tickets file found yet.' }; return; }
+      context.res = { headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) }; return;
+    }
     context.res = { status:404, body:`Unknown source '${id}'.` };
   } catch (e) { context.res = { status:502, body:'Source fetch failed: ' + (e.message || String(e)) }; }
 };
