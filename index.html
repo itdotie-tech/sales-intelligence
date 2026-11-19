@@ -3298,79 +3298,116 @@ window.exportReconcile=function(){
   for(const s of unmatched.sort()) out.push(['autotask_unmatched','','','','',s,atSales[s]||'']);
   dl(out.map(r=>r.map(q).join(',')).join('\n'),'itie-name-reconciliation.csv','text/csv');
 };
+function tkToDate(y){ return new Date(Math.floor(y/10000), Math.floor(y/100)%100-1, y%100); }
+function tkYmd(d){ return d.getFullYear()*10000+(d.getMonth()+1)*100+d.getDate(); }
+function tkFmtInput(y){ const s=''+y; return s.slice(0,4)+'-'+s.slice(4,6)+'-'+s.slice(6,8); }
+function tkParseInput(s){ if(!s) return null; const p=s.split('-'); if(p.length!==3) return null; const v=(+p[0])*10000+(+p[1])*100+(+p[2]); return isFinite(v)?v:null; }
+function tkShiftDays(y,n){ const d=tkToDate(y); d.setDate(d.getDate()+n); return tkYmd(d); }
+function tkShiftMonths(y,n){ const d=tkToDate(y); d.setMonth(d.getMonth()+n); return tkYmd(d); }
+function tkFyStart(y){ const d=tkToDate(y); const yr=d.getFullYear(); const mar=(d.getMonth()+1)>=3?yr:yr-1; return mar*10000+301; }
+window.tkSet=function(q){ const T=window.TICKETS; if(!T)return; const dmax=T._dmax,dmin=T._dmin; let from,to=dmax;
+  if(q==='30d')from=tkShiftDays(dmax,-29); else if(q==='90d')from=tkShiftDays(dmax,-89);
+  else if(q==='6m')from=tkShiftMonths(dmax,-6); else if(q==='12m')from=tkShiftMonths(dmax,-12);
+  else if(q==='24m')from=dmin; else if(q==='fy')from=tkFyStart(dmax); else from=tkShiftMonths(dmax,-12);
+  if(from<dmin)from=dmin; window.TKRANGE={from,to,quick:q}; renderTickets(); };
+window.tkCustom=function(){ const f=tkParseInput(document.getElementById('tkFrom').value), t=tkParseInput(document.getElementById('tkTo').value);
+  if(f&&t&&f<=t){ window.TKRANGE={from:f,to:t,quick:''}; renderTickets(); } };
+window.tkToggle=function(gi){ document.querySelectorAll('[data-tkg="'+gi+'"]').forEach(r=>{ r.style.display=(r.style.display==='none')?'':'none'; }); };
 function renderTickets(){
   const el=document.getElementById('pg-tickets');
   const T=window.TICKETS;
-  if(!T||!Array.isArray(T.sites)||!T.sites.length){
-    el.innerHTML='<h1 class="ph">Tickets <em>· Autotask</em></h1><div class="note"><b>No ticket feed yet.</b> This page reads <code>autotask-tickets.json</code> from storage — run the Autotask tickets extract on the office device.</div>';
+  if(!T||!Array.isArray(T.tickets)||!T.tickets.length||!Array.isArray(T.sites)){
+    el.innerHTML='<h1 class="ph">Tickets <em>&middot; Autotask</em></h1><div class="note"><b>No ticket feed yet.</b> This page reads <code>autotask-tickets.json</code> (per-ticket, 24 months) from storage &mdash; run the Autotask tickets extract on the office device and upload it.</div>';
     return;
   }
   const nf=v=>Math.round(+v||0).toLocaleString();
   const G2='display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px;margin:14px 0';
-  const sites=T.sites;
-  function der(s){ const w=(s.totals&&s.totals.w12)?s.totals.w12:{total:0,user:0,auto:0,hours:0};
-    let reopened=0; for(const m of (s.monthly||[])) reopened+=+m.reopened||0;
-    return {name:s.name||'(unnamed)',total:+w.total||0,user:+w.user||0,auto:+w.auto||0,hours:+w.hours||0,reopened,sla:s.sla||null}; }
-  const D=sites.map(der);
-  // multi-site rollup: group by the prefix before " - " when 2+ sites share it
-  const pc={}; D.forEach(d=>{ const i=d.name.indexOf(' - '); if(i>0){ const p=d.name.slice(0,i).trim(); pc[p]=(pc[p]||0)+1; } });
-  const gkey=n=>{ const i=n.indexOf(' - '); if(i>0){ const p=n.slice(0,i).trim(); if(pc[p]>=2) return p; } return n; };
-  const groups={};
-  D.forEach(d=>{ const k=gkey(d.name); const g=groups[k]=groups[k]||{name:k,sites:[],total:0,user:0,auto:0,hours:0,reopened:0,met:0,miss:0,frW:0,frN:0,resW:0,resN:0};
-    g.sites.push(d); g.total+=d.total; g.user+=d.user; g.auto+=d.auto; g.hours+=d.hours; g.reopened+=d.reopened;
-    if(d.sla){ g.met+=+d.sla.slaMet||0; g.miss+=+d.sla.slaMissed||0; const wt=d.user||1;
-      if(d.sla.firstResponseAvgHrs!=null){ g.frW+=d.sla.firstResponseAvgHrs*wt; g.frN+=wt; }
-      if(d.sla.resolutionAvgHrs!=null){ g.resW+=d.sla.resolutionAvgHrs*wt; g.resN+=wt; } } });
-  const gArr=Object.values(groups).sort((a,b)=>b.total-a.total);
-  let tTot=0,tUser=0,tAuto=0,tHours=0,sMet=0,sMiss=0,frW=0,frN=0,resW=0,resN=0;
-  gArr.forEach(g=>{ tTot+=g.total;tUser+=g.user;tAuto+=g.auto;tHours+=g.hours;sMet+=g.met;sMiss+=g.miss;frW+=g.frW;frN+=g.frN;resW+=g.resW;resN+=g.resN; });
-  const slaPct=(sMet+sMiss)>0?Math.round(100*sMet/(sMet+sMiss)):null;
-  const frAvg=frN>0?frW/frN:null, resAvg=resN>0?resW/resN:null;
-  const mAgg={}; sites.forEach(s=>{ for(const m of (s.monthly||[])){ const o=mAgg[m.ym]=mAgg[m.ym]||{user:0,auto:0}; o.user+=+m.user||0; o.auto+=+m.auto||0; } });
-  const months=Object.keys(mAgg).sort();
-  const iss=(T.issueTypeAudit||[]).slice(0,12);
-  const src=(T.sources||[]).slice().sort((a,b)=>(+b.tickets||0)-(+a.tickets||0));
-  const engs=(T.engineers||[]).slice(0,12);
+  if(T._dmax===undefined){ let mn=99999999,mx=0; for(const r of T.tickets){ const d=r[0]; if(d<mn)mn=d; if(d>mx)mx=d; } T._dmin=mn; T._dmax=mx; }
+  if(!window.TKRANGE){ let from=tkShiftMonths(T._dmax,-12); if(from<T._dmin)from=T._dmin; window.TKRANGE={from,to:T._dmax,quick:'12m'}; }
+  const R=window.TKRANGE;
+  if(!T._site){ let X=null,ix=null; try{ X=mapIndex(); ix=PIPE.buildIndex(C); }catch(e){}
+    const pc={}; T.sites.forEach(nm=>{ const i=nm.indexOf(' - '); if(i>0){ const p=nm.slice(0,i).trim(); pc[p]=(pc[p]||0)+1; } });
+    T._site=T.sites.map(nm=>{ let cli=null; if(X&&ix){ try{ const r=_resolveSite(nm,X,ix); if(r&&r!=='__skip__') cli=r; }catch(e){} }
+      let group=cli; if(!group){ const i=nm.indexOf(' - '); group=(i>0&&pc[nm.slice(0,i).trim()]>=2)?nm.slice(0,i).trim():nm; }
+      let owner='Unassigned'; try{ owner=ownerOf(group)||'Unassigned'; }catch(e){}
+      return {name:nm,client:cli,group,owner}; });
+  }
+  const S=T._site, types=T.types, sources=T.sources, engs=T.engineers;
+  const selNames=(state.sel&&state.sel.size)?new Set([...state.sel].map(i=>C[i])):null;
+  const ownerF=state.owner||null;
+  let tot=0,user=0,auto=0,hours=0,reop=0;
+  const byG={}, byType={}, bySrc={}, byEng={}, byBucket={};
+  const rangeDays=(tkToDate(R.to)-tkToDate(R.from))/86400000;
+  const daily=rangeDays<=92;
+  for(const r of T.tickets){
+    const d=r[0]; if(d<R.from||d>R.to) continue;
+    const s=S[r[1]]; if(!s) continue;
+    if(ownerF && s.owner!==ownerF) continue;
+    if(selNames && !(s.client && selNames.has(s.client))) continue;
+    const au=r[2], hr=+r[6]||0, ro=r[7];
+    tot++; if(au)auto++; else user++; hours+=hr; if(ro)reop++;
+    const g=byG[s.group]=byG[s.group]||{group:s.group,owner:s.owner,total:0,user:0,auto:0,hours:0,reop:0,bySite:{}};
+    g.total++; if(au)g.auto++; else g.user++; g.hours+=hr; if(ro)g.reop++;
+    const ps=g.bySite[s.name]=g.bySite[s.name]||{name:s.name,total:0,user:0,auto:0,hours:0,reop:0};
+    ps.total++; if(au)ps.auto++; else ps.user++; ps.hours+=hr; if(ro)ps.reop++;
+    const tn=types[r[3]]||'(untagged)'; const tt=byType[tn]=byType[tn]||{type:tn,total:0,auto:0}; tt.total++; if(au)tt.auto++;
+    const sn=sources[r[4]]||'(none)'; const ss=bySrc[sn]=bySrc[sn]||{name:sn,total:0,auto:0}; ss.total++; if(au)ss.auto++;
+    if(r[5]>=0){ const enm=engs[r[5]]||'(unknown)'; const ee=byEng[enm]=byEng[enm]||{eng:enm,total:0,hours:0}; ee.total++; ee.hours+=hr; }
+    const key=daily?(''+d):(''+Math.floor(d/100)); const bk=byBucket[key]=byBucket[key]||{user:0,auto:0}; if(au)bk.auto++; else bk.user++;
+  }
+  const gArr=Object.values(byG).sort((a,b)=>b.total-a.total);
+  const typeArr=Object.values(byType).sort((a,b)=>b.total-a.total).slice(0,14);
+  const srcArr=Object.values(bySrc).sort((a,b)=>b.total-a.total);
+  const engArr=Object.values(byEng).sort((a,b)=>b.total-a.total).slice(0,14);
+  const buckets=Object.keys(byBucket).sort();
+  const blabel=k=> daily ? (k.slice(4,6)+'/'+k.slice(6,8)) : (k.slice(4,6)+'/'+k.slice(0,4));
+  const qb=(id,lab)=>`<button class="btn ${R.quick===id?'':'ghost'} sm" onclick="tkSet('${id}')">${lab}</button>`;
+  const filtNote=(ownerF?('AM: '+esc(ownerF)):'')+(ownerF&&selNames?' &middot; ':'')+(selNames?(selNames.size+' selected client(s)'):'');
   el.innerHTML=`
-  <h1 class="ph">Tickets <em>· Autotask</em></h1>
-  <p class="psub">Human-logged and automated tickets over the last 12 months, with multi-site clients rolled up. Auto = monitoring alerts, alert-type and recurring tickets; User = everything raised by people (email, phone, portal, in person).${T.generatedAt?' Feed generated '+new Date(T.generatedAt).toLocaleDateString()+'.':''}</p>
+  <h1 class="ph">Tickets <em>&middot; Autotask</em></h1>
+  <p class="psub">Every ticket over the last 24 months &mdash; filter by date, and it follows the client / account-manager filters at the top.${filtNote?' <b>'+filtNote+'</b>':' Showing all clients.'}</p>
+  <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:8px 0 4px">
+    ${qb('30d','30 days')}${qb('90d','90 days')}${qb('6m','6 months')}${qb('12m','12 months')}${qb('24m','24 months')}${qb('fy','This FY')}
+    <span style="margin-left:10px;color:var(--mut);font-size:12px">Custom:</span>
+    <input type="date" id="tkFrom" value="${tkFmtInput(R.from)}" style="background:#0f1d36;border:1px solid var(--line);border-radius:6px;color:var(--text);padding:4px 7px">
+    <span style="color:var(--mut)">to</span>
+    <input type="date" id="tkTo" value="${tkFmtInput(R.to)}" style="background:#0f1d36;border:1px solid var(--line);border-radius:6px;color:var(--text);padding:4px 7px">
+    <button class="btn sm" onclick="tkCustom()">Apply</button>
+  </div>
+  <div class="hint" style="margin-bottom:10px">${tkFmtInput(R.from)} to ${tkFmtInput(R.to)} &middot; ${daily?'daily':'monthly'} view</div>
   <div class="grid cards">
-    <div class="card hl"><div class="k">Total tickets</div><div class="v">${nf(tTot)}</div><div class="s">last 12 months</div></div>
-    <div class="card"><div class="k">User-generated</div><div class="v">${nf(tUser)}</div><div class="s">${tTot?Math.round(100*tUser/tTot):0}% of total</div></div>
-    <div class="card"><div class="k">Automated</div><div class="v">${nf(tAuto)}</div><div class="s">${tTot?Math.round(100*tAuto/tTot):0}% of total</div></div>
-    <div class="card"><div class="k">Worked hours</div><div class="v">${nf(tHours)}</div><div class="s">logged on tickets</div></div>
-    ${slaPct!=null?`<div class="card"><div class="k">SLA met</div><div class="v ${slaPct<80?'warn':'pos'}">${slaPct}%</div><div class="s">user tickets with an SLA</div></div>`:''}
-    ${frAvg!=null?`<div class="card"><div class="k">Avg first response</div><div class="v">${frAvg.toFixed(1)}h</div><div class="s">user tickets</div></div>`:''}
-    ${resAvg!=null?`<div class="card"><div class="k">Avg resolution</div><div class="v">${resAvg.toFixed(1)}h</div><div class="s">user tickets</div></div>`:''}
+    <div class="card hl"><div class="k">Total tickets</div><div class="v">${nf(tot)}</div><div class="s">in range</div></div>
+    <div class="card"><div class="k">User-generated</div><div class="v">${nf(user)}</div><div class="s">${tot?Math.round(100*user/tot):0}% of total</div></div>
+    <div class="card"><div class="k">Automated</div><div class="v">${nf(auto)}</div><div class="s">${tot?Math.round(100*auto/tot):0}% of total</div></div>
+    <div class="card"><div class="k">Worked hours</div><div class="v">${nf(hours)}</div><div class="s">${nf(reop)} reopened</div></div>
   </div>
+  <div class="panel"><h3>Tickets over time</h3><div class="hint">User vs automated${daily?' (by day)':' (by month)'}</div><div class="chartbox tall"><canvas id="tkTrend"></canvas></div></div>
   <div style="${G2}">
-    <div class="panel"><h3>Tickets by month</h3><div class="hint">User vs automated, last 12 months</div><div class="chartbox tall"><canvas id="tkTrend"></canvas></div></div>
-    <div class="panel"><h3>Ticket sources</h3><div class="hint">Where tickets originate (last 12 months)</div><div class="twrap" style="max-height:330px"><table><thead><tr><th>Source</th><th class="num">Tickets</th><th class="num">Auto</th></tr></thead><tbody>${src.map(s=>`<tr><td>${esc(s.name)}</td><td class="num">${nf(s.tickets)}</td><td class="num">${nf(s.auto)}</td></tr>`).join('')||'<tr><td colspan=3 class="hint">No source data.</td></tr>'}</tbody></table></div></div>
+    <div class="panel"><h3>Ticket types</h3><div class="hint">Issue type in range, with automated share</div><div class="twrap" style="max-height:360px"><table><thead><tr><th>Type</th><th class="num">Tickets</th><th class="num">% auto</th></tr></thead><tbody>${typeArr.map(x=>`<tr><td>${esc(x.type)}</td><td class="num">${nf(x.total)}</td><td class="num">${x.total?Math.round(100*x.auto/x.total):0}%</td></tr>`).join('')||'<tr><td colspan=3 class="hint">No tickets in range.</td></tr>'}</tbody></table></div></div>
+    <div class="panel"><h3>Engineers</h3><div class="hint">Tickets handled &amp; hours in range</div><div class="twrap" style="max-height:360px"><table><thead><tr><th>Engineer</th><th class="num">Tickets</th><th class="num">Hours</th></tr></thead><tbody>${engArr.map(e=>`<tr><td>${esc(e.eng)}</td><td class="num">${nf(e.total)}</td><td class="num">${nf(e.hours)}</td></tr>`).join('')||'<tr><td colspan=3 class="hint">No data.</td></tr>'}</tbody></table></div></div>
   </div>
-  <div style="${G2}">
-    <div class="panel"><h3>Top ticket types</h3><div class="hint">Issue type (12m), with automated share</div><div class="twrap" style="max-height:360px"><table><thead><tr><th>Type</th><th class="num">Tickets</th><th class="num">% auto</th></tr></thead><tbody>${iss.map(s=>`<tr><td>${esc(s.type)}</td><td class="num">${nf(s.tickets)}</td><td class="num">${s.tickets?Math.round(100*s.auto/s.tickets):0}%</td></tr>`).join('')||'<tr><td colspan=3 class="hint">No type data.</td></tr>'}</tbody></table></div></div>
-    <div class="panel"><h3>Engineers</h3><div class="hint">Tickets assigned &amp; completed (last 12 months)</div><div class="twrap" style="max-height:360px"><table><thead><tr><th>Engineer</th><th class="num">Assigned</th><th class="num">Completed</th><th class="num">Hours</th></tr></thead><tbody>${engs.map(e=>`<tr><td>${esc(e.engineer)}</td><td class="num">${nf(e.totals.assigned)}</td><td class="num">${nf(e.totals.completed)}</td><td class="num">${nf(e.totals.hours)}</td></tr>`).join('')||'<tr><td colspan=4 class="hint">No engineer data.</td></tr>'}</tbody></table></div></div>
+  <div class="panel" style="border-left:3px solid var(--blue)"><h3>How a ticket is classified</h3>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin-top:8px">
+      <div><div style="color:#64d394;font-weight:600;margin-bottom:4px">User-generated (${tot?Math.round(100*user/tot):0}% in range)</div><div class="hint">Raised by a person &mdash; Email, Phone, Web Portal, In Person, Verbal. This is the real demand on the service desk.</div></div>
+      <div><div style="color:#f6c948;font-weight:600;margin-bottom:4px">Automated (${tot?Math.round(100*auto/tot):0}% in range)</div><div class="hint">Machine-generated: the Monitoring source, the Alert ticket type, RMM/AEM alerts, recurring tickets, and notification issue types (${(T.autoIssueTypes||[]).map(esc).join(', ')||'none'}).</div></div>
+    </div>
+    <div class="hint" style="margin-top:8px"><b>Sources in range:</b> ${srcArr.map(s=>esc(s.name)+' '+nf(s.total)+(s.auto?(' ('+nf(s.auto)+' auto)'):'')).join(' &middot; ')||'&mdash;'}</div>
   </div>
-  <div class="panel"><h3>Clients by ticket volume</h3><div class="hint">Multi-site clients are rolled up — click a client marked ▸ to expand its sites. Last 12 months.</div>
-    <div class="twrap" style="max-height:620px"><table><thead><tr><th>Client</th><th class="num">Sites</th><th class="num">Tickets</th><th class="num">User</th><th class="num">Auto</th><th class="num">Hours</th><th class="num">Reopened</th><th class="num">SLA%</th></tr></thead><tbody>
+  <div class="panel"><h3>Clients by ticket volume</h3><div class="hint">Multi-site clients rolled up &mdash; click a client marked &#9656; to expand its sites. Reflects the date range and the top filters.</div>
+    <div class="twrap" style="max-height:620px"><table><thead><tr><th>Client</th><th class="num">Sites</th><th class="num">Tickets</th><th class="num">User</th><th class="num">Auto</th><th class="num">Hours</th><th class="num">Reopened</th><th>Account manager</th></tr></thead><tbody>
     ${gArr.map((g,gi)=>{
-      const multi=g.sites.length>1;
-      const sp=(g.met+g.miss)>0?Math.round(100*g.met/(g.met+g.miss)):null;
-      const head=`<tr class="${multi?'clink':''}"${multi?` onclick="tkToggle(${gi})"`:''}><td>${multi?'▸ ':''}${esc(g.name)}</td><td class="num">${g.sites.length}</td><td class="num">${nf(g.total)}</td><td class="num">${nf(g.user)}</td><td class="num">${nf(g.auto)}</td><td class="num">${nf(g.hours)}</td><td class="num">${nf(g.reopened)}</td><td class="num">${sp!=null?sp+'%':'—'}</td></tr>`;
-      const subs=multi?g.sites.slice().sort((a,b)=>b.total-a.total).map(d=>{
-        const dp=d.sla&&((+d.sla.slaMet||0)+(+d.sla.slaMissed||0))>0?Math.round(100*(+d.sla.slaMet||0)/((+d.sla.slaMet||0)+(+d.sla.slaMissed||0))):null;
-        return `<tr data-tkg="${gi}" style="display:none;background:rgba(255,255,255,.02)"><td style="padding-left:22px;color:var(--mut)">${esc(d.name)}</td><td class="num"></td><td class="num">${nf(d.total)}</td><td class="num">${nf(d.user)}</td><td class="num">${nf(d.auto)}</td><td class="num">${nf(d.hours)}</td><td class="num">${nf(d.reopened)}</td><td class="num">${dp!=null?dp+'%':'—'}</td></tr>`;
-      }).join(''):'';
+      const siteN=Object.keys(g.bySite).length, multi=siteN>1;
+      const head=`<tr class="${multi?'clink':''}"${multi?` onclick="tkToggle(${gi})"`:''}><td>${multi?'&#9656; ':''}${esc(g.group)}</td><td class="num">${siteN}</td><td class="num">${nf(g.total)}</td><td class="num">${nf(g.user)}</td><td class="num">${nf(g.auto)}</td><td class="num">${nf(g.hours)}</td><td class="num">${nf(g.reop)}</td><td>${esc(g.owner)}</td></tr>`;
+      const subs=multi?Object.values(g.bySite).sort((a,b)=>b.total-a.total).map(d=>`<tr data-tkg="${gi}" style="display:none;background:rgba(255,255,255,.02)"><td style="padding-left:22px;color:var(--mut)">${esc(d.name)}</td><td class="num"></td><td class="num">${nf(d.total)}</td><td class="num">${nf(d.user)}</td><td class="num">${nf(d.auto)}</td><td class="num">${nf(d.hours)}</td><td class="num">${nf(d.reop)}</td><td></td></tr>`).join(''):'';
       return head+subs;
-    }).join('')}
+    }).join('')||'<tr><td colspan=8 class="hint">No tickets match the current filters.</td></tr>'}
     </tbody></table></div>
   </div>`;
-  mkChart('tkTrend',{type:'bar',data:{labels:months,datasets:[
-    {label:'User',data:months.map(k=>mAgg[k].user),backgroundColor:'#00a0d8',stack:'a',borderRadius:3},
-    {label:'Automated',data:months.map(k=>mAgg[k].auto),backgroundColor:'rgba(249,194,13,.85)',stack:'a',borderRadius:3}
-  ]},options:{maintainAspectRatio:false,plugins:{legend:{position:'top'}},scales:{x:{stacked:true},y:{stacked:true,ticks:{precision:0}}}}});
+  mkChart('tkTrend',{type:'bar',data:{labels:buckets.map(blabel),datasets:[
+    {label:'User',data:buckets.map(k=>byBucket[k].user),backgroundColor:'#00a0d8',stack:'a',borderRadius:2},
+    {label:'Automated',data:buckets.map(k=>byBucket[k].auto),backgroundColor:'rgba(249,194,13,.85)',stack:'a',borderRadius:2}
+  ]},options:{maintainAspectRatio:false,plugins:{legend:{position:'top'}},scales:{x:{stacked:true,ticks:{maxRotation:0,autoSkip:true,maxTicksLimit:16}},y:{stacked:true,ticks:{precision:0}}}}});
 }
-window.tkToggle=function(gi){ document.querySelectorAll('[data-tkg="'+gi+'"]').forEach(r=>{ r.style.display=(r.style.display==='none')?'':'none'; }); };
 const RENDER={multisite:renderMultiSite,action:renderAction,ownermap:renderOwnerMap,match:renderMatch,diag:renderDiag,exec:renderExec,radar:renderRadar,fin:renderFin,kpi:renderKpi,c360:renderC360,risk:renderRisk,ops:renderOps,tickets:renderTickets,quality:renderQuality,price:renderPrice,gap:renderGap,m365:renderM365,posture:renderPosture,cyber:renderCyber,nis2:renderNis2,win10:renderWin10,pkg:renderPkg,am:renderAm,health:renderHealth,churn:renderChurn,crm:renderCrm,pipeline:renderPipeline,leads:renderLeads,assign:renderAssign,recon:renderRecon,data:renderData};
 
 /* ================= CRM (Nimble) merge layer ================= */
@@ -3702,27 +3739,31 @@ function askContext(){
           monthlyNote:'These support figures are windowed totals + a 12-month issue-type mix. For ticket COUNTS by month, ticket type, auto-vs-user, per client (multi-site rolled up) and per engineer, use ctx.tickets instead.',
           windowTotals:byWin };
       }catch(e){ ctx.supportError=String(e&&e.message||e); }
-      // tickets cube (Autotask): month-by-month, auto/user, types, engineers, per client rolled up
+      // tickets cube (Autotask, per-ticket): last 12 months, rolled up by client with account manager
       try{
         const T=window.TICKETS;
-        if(T&&Array.isArray(T.sites)&&T.sites.length){
-          const D=T.sites.map(s=>{const w=(s.totals&&s.totals.w12)||{total:0,user:0,auto:0,hours:0};let re=0;for(const mm of (s.monthly||[]))re+=+mm.reopened||0;return{name:s.name||'',total:+w.total||0,user:+w.user||0,auto:+w.auto||0,hours:+w.hours||0,reopened:re};});
-          const pcT={};D.forEach(d=>{const i=d.name.indexOf(' - ');if(i>0){const p=d.name.slice(0,i).trim();pcT[p]=(pcT[p]||0)+1;}});
-          const gkT=n=>{const i=n.indexOf(' - ');if(i>0){const p=n.slice(0,i).trim();if(pcT[p]>=2)return p;}return n;};
-          const gmT={};D.forEach(d=>{const k=gkT(d.name);const g=gmT[k]=gmT[k]||{client:k,sites:0,total:0,user:0,auto:0,hours:0,reopened:0};g.sites++;g.total+=d.total;g.user+=d.user;g.auto+=d.auto;g.hours+=Math.round(d.hours);g.reopened+=d.reopened;});
-          const groups=Object.values(gmT).sort((a,b)=>b.total-a.total);
-          let tt=0,tu=0,ta=0,th=0;groups.forEach(g=>{tt+=g.total;tu+=g.user;ta+=g.auto;th+=g.hours;});
-          const mA={};T.sites.forEach(s=>{for(const mm of (s.monthly||[])){const o=mA[mm.ym]=mA[mm.ym]||{total:0,user:0,auto:0};o.total+=+mm.total||0;o.user+=+mm.user||0;o.auto+=+mm.auto||0;}});
-          ctx.tickets={
-            window:'last 12 months',
-            note:'Autotask tickets. auto = monitoring/alert/recurring; user = human-raised (email, phone, portal, in person). byClient is rolled up so multi-site groups (e.g. EMEIS) are one row with a site count. monthlyByMonth is all clients combined, keyed YYYY-MM. byClient is the top 300 clients by volume.',
+        if(T&&Array.isArray(T.tickets)&&T.tickets.length&&Array.isArray(T.sites)){
+          let dmax=0; for(const r of T.tickets){ if(r[0]>dmax)dmax=r[0]; }
+          const dd=new Date(Math.floor(dmax/10000),Math.floor(dmax/100)%100-1,dmax%100); dd.setMonth(dd.getMonth()-12);
+          const from=dd.getFullYear()*10000+(dd.getMonth()+1)*100+dd.getDate();
+          const pcT={}; T.sites.forEach(nm=>{const i=nm.indexOf(' - ');if(i>0){const p=nm.slice(0,i).trim();pcT[p]=(pcT[p]||0)+1;}});
+          const grp=T.sites.map(nm=>{const i=nm.indexOf(' - ');const g=(i>0&&pcT[nm.slice(0,i).trim()]>=2)?nm.slice(0,i).trim():nm; let ow='Unassigned'; try{ow=ownerOf(g)||'Unassigned';}catch(e){} return {g,ow};});
+          const types=T.types||[];
+          let tt=0,tu=0,ta=0,th=0; const byC={},byT={},mA={};
+          for(const r of T.tickets){ if(r[0]<from)continue; const gg=grp[r[1]]; if(!gg)continue; const au=r[2];
+            tt++; if(au)ta++; else tu++; th+=+r[6]||0;
+            const c=byC[gg.g]=byC[gg.g]||{client:gg.g,accountManager:gg.ow,total:0,user:0,auto:0}; c.total++; if(au)c.auto++; else c.user++;
+            const tn=types[r[3]]||'(untagged)'; const x=byT[tn]=byT[tn]||{type:tn,total:0,auto:0}; x.total++; if(au)x.auto++;
+            const mk=''+Math.floor(r[0]/100); const mm=mA[mk]=mA[mk]||{total:0,user:0,auto:0}; mm.total++; if(au)mm.auto++; else mm.user++;
+          }
+          const byClient=Object.values(byC).sort((a,b)=>b.total-a.total).slice(0,300);
+          const topTypes=Object.values(byT).sort((a,b)=>b.total-a.total).slice(0,20);
+          const monthly={}; Object.keys(mA).sort().forEach(k=>{ monthly[k.slice(0,4)+'-'+k.slice(4,6)]=mA[k]; });
+          ctx.tickets={ window:'last 12 months',
+            note:'Autotask tickets, last 12 months. auto = monitoring/alert/recurring tickets and notification issue types; user = raised by a person (email, phone, portal, in person). byClient is rolled up so multi-site groups (e.g. EMEIS) are one row, each with its accountManager. monthlyByMonth is all clients combined, keyed YYYY-MM. byClient lists the top 300 by volume. The dashboard holds 24 months of per-ticket detail; ticket questions by client, type, month or account manager can be answered.',
+            autoRule:T.autoRule||'',
             overall:{total:tt,user:tu,auto:ta,workedHours:Math.round(th)},
-            monthlyByMonth:mA,
-            byClient:groups.slice(0,300),
-            topTypes:(T.issueTypeAudit||[]).slice(0,20).map(x=>({type:x.type,tickets:x.tickets,auto:x.auto})),
-            sources:(T.sources||[]).map(x=>({name:x.name,tickets:x.tickets,auto:x.auto})),
-            engineers:(T.engineers||[]).slice(0,25).map(e=>({engineer:e.engineer,assigned:e.totals.assigned,completed:e.totals.completed,hours:e.totals.hours}))
-          };
+            monthlyByMonth:monthly, byClient, topTypes };
         }
       }catch(e){ ctx.ticketsError=String(e&&e.message||e); }
       // month-by-month recurring revenue (sum of per-client recurring-equivalent MRR)
@@ -4179,16 +4220,9 @@ async function loadAutotaskTickets(){
     const r=await fetch('/api/getSource/autotask-tickets',{credentials:'include',cache:'no-store'});
     if(!r.ok) return;
     const j=await r.json();
-    if(j && (j.sites||j.engineers)){
-      if(!Array.isArray(j.sites)) j.sites=j.sites?[j.sites]:[];
-      if(!Array.isArray(j.engineers)) j.engineers=j.engineers?[j.engineers]:[];
-      for(const s of j.sites){ if(s){ if(!Array.isArray(s.monthly)) s.monthly=s.monthly?[s.monthly]:[]; if(!Array.isArray(s.types)) s.types=s.types?[s.types]:[]; } }
-      for(const e of j.engineers){ if(e&&!Array.isArray(e.monthly)) e.monthly=e.monthly?[e.monthly]:[]; }
-      if(j.sources&&!Array.isArray(j.sources)) j.sources=[j.sources];
-      if(j.ticketTypes&&!Array.isArray(j.ticketTypes)) j.ticketTypes=[j.ticketTypes];
-      if(j.issueTypeAudit&&!Array.isArray(j.issueTypeAudit)) j.issueTypeAudit=[j.issueTypeAudit];
+    if(j && Array.isArray(j.tickets) && Array.isArray(j.sites)){
       window.TICKETS=j;
-      try{ SOURCE_DATA['autotasktickets']={data:j,loadedAt:(j.generatedAt||new Date().toISOString())}; saveSourceData(); }catch(e){}
+      try{ SOURCE_DATA['autotasktickets']={data:{generatedAt:j.generatedAt,count:j.tickets.length},loadedAt:(j.generatedAt||new Date().toISOString())}; saveSourceData(); }catch(e){}
     }
   }catch(e){}
 }
