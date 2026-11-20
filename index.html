@@ -3816,6 +3816,17 @@ function askContext(){
       ctx.totals={managedITrevenue:Math.round(tMit),overallRevenue:Math.round(tRev),costToServe:Math.round(tCost),managedITmargin:Math.round(tMargin),clientsUnderwater:under,billableHours:Math.round(tB),nonBillableHours:Math.round(tNB),costRatePerHour:COST_RATE};
       ctx.owners=Object.entries(owners).map(([name,v])=>({name,clients:v.clients,managedIT:Math.round(v.managedIT),margin:Math.round(v.margin)})).sort((a,b)=>b.managedIT-a.managedIT);
       ctx.clients=clients;
+      // inverted indexes: which clients hold each service line / M365 product (for "list clients with X" questions)
+      try{
+        const bySvc={}, byM365={};
+        for(let i=0;i<NC0;i++){ const m=META[i]; if(!isClient(m))continue;
+          const so=(typeof PIPE!=='undefined'&&PIPE.SVC_ORDER)?PIPE.SVC_ORDER:Object.keys(m.mrr||{});
+          so.forEach(sv=>{ if(m.mrr&&m.mrr[sv]>0){ const lb=(typeof SVC_LABEL!=='undefined'&&SVC_LABEL[sv])||sv; (bySvc[lb]=bySvc[lb]||[]).push(m.n); } });
+          if(m.m365){ Object.keys(m.m365).forEach(p=>{ (byM365[p]=byM365[p]||[]).push(m.n); }); }
+        }
+        ctx.serviceLines={ note:'Clients holding each service line (NetSuite recurring MRR > 0 in the current view). Use for "list clients with X" by product, e.g. CyberProtect User, CyberProtect Endpoint, Microsoft 365, Azure, Backup / DR, VoIP, SOC. members maps the service-line label to the list of client names.', members:bySvc };
+        ctx.m365Products={ note:'Clients holding each Microsoft 365 product or add-on, including Copilot (from M365 usage data). Use for M365 SKU questions, e.g. list clients with Copilot licences. members maps the product name to the list of client names.', members:byM365 };
+      }catch(e){ ctx.serviceIndexError=String(e&&e.message||e); }
       // support: per-client tickets + ticket-type mix are on each client (for ctx.period); window totals + scope note here
       try{
         const S=window.SUPPORT; const byWin={};

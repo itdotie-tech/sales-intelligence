@@ -1,60 +1,68 @@
-const { getCrmData } = require('../shared/nimble');
-const { getNetsuiteData } = require('../shared/netsuite');
-const { getContactTags } = require('../shared/nimble');
+// IT.ie Command Centre — "Ask" assistant.
+// Grounds an Azure OpenAI chat model on a snapshot of the dashboard's own
+// computed figures (sent by the browser), so answers come from the live
+// numbers rather than the raw feeds. Zero external dependencies: Node 18+
+// global fetch + the Azure OpenAI REST API, keyed from app settings.
+//   AOAI_ENDPOINT    e.g. https://itie-openai.openai.azure.com
+//   AOAI_KEY         the resource key   (never in code or chat)
+//   AOAI_DEPLOYMENT  the model deployment name, e.g. gpt-4-1-nano
+//   AOAI_API_VERSION optional, defaults below
+
+const SYS = [
+  "You are the built-in assistant for IT.ie's internal \"Command Centre\" dashboard.",
+  "Answer the user's question using ONLY the figures in the DATA object provided",
+  "(revenue, Managed IT margin, cost to serve, support hours, CRM pipeline, owners, clients).",
+  "All money is in euro (€). Be concise and specific: give the number first, then a one-line read.",
+  "Definitions: Managed IT margin = Managed IT revenue minus cost to serve; cost to serve = non-billable",
+  "support hours × the hourly rate; \"underwater\" = cost to serve exceeds the Managed IT fee.",
+  "When helpful, point to the page to open (Profitability & Risk, Operations, CRM Overview,",
+  "Pipeline Health, Lead Assignment, Multi-site). If the answer is not in DATA, say you don't have",
+  "that figure in the current view rather than guessing. Never invent clients, owners or numbers."
+].join(' ');
+
 module.exports = async function (context, req) {
-  const id = String(context.bindingData.id || '').toLowerCase();
-  const pageRaw = req.query && req.query.page;
-  const page = (pageRaw!=null && pageRaw!=='') ? parseInt(pageRaw,10) : null;
-  const from = (req.query && req.query.from) || null;
-  const to = (req.query && req.query.to) || null;
+  const body = (req && req.body) || {};
+  const question = String(body.question || '').slice(0, 1200).trim();
+  const data = body.context || {};
+  const json = o => ({ headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(o) });
+
+  if (!question) { context.res = Object.assign({ status: 400 }, json({ error: 'No question.' })); return; }
+
+  const ep = process.env.AOAI_ENDPOINT, key = process.env.AOAI_KEY, dep = process.env.AOAI_DEPLOYMENT;
+  const ver = process.env.AOAI_API_VERSION || '2024-10-21';
+  if (!ep || !key || !dep) {
+    context.res = json({ notConfigured: true, answer: "The Ask assistant isn't switched on yet — the Azure OpenAI settings (AOAI_ENDPOINT, AOAI_KEY, AOAI_DEPLOYMENT) aren't saved on the app. Once your model is deployed and those four variables are set, this starts answering automatically." });
+    return;
+  }
+
+  const url = ep.replace(/\/+$/, '') + '/openai/deployments/' + encodeURIComponent(dep) + '/chat/completions?api-version=' + encodeURIComponent(ver);
+  const dataStr = JSON.stringify(data).slice(0, 700000); // bounded, but roomy for gpt-4.1-mini's large context (lets the per-client service/M365 indexes through)
+  const payload = {
+    messages: [
+      { role: 'system', content: SYS },
+      { role: 'user', content: 'DATA (the current dashboard figures):\n' + dataStr + '\n\nQUESTION: ' + question }
+    ],
+    temperature: 0.1,
+    max_tokens: 700
+  };
+
+  const ac = new AbortController(); const to = setTimeout(() => ac.abort(), 25000);
   try {
-    if (id === 'nimble') {
-      const token = process.env.NIMBLE_ACCESS_TOKEN;
-      if (!token) { context.res = { status:500, body:'NIMBLE_ACCESS_TOKEN is not set.' }; return; }
-      context.res = { headers:{'Content-Type':'application/json'}, body: JSON.stringify(await getCrmData(token)) }; return;
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'api-key': key }, body: JSON.stringify(payload), signal: ac.signal });
+    const text = await r.text().catch(() => '');
+    if (!r.ok) {
+      let msg = text.slice(0, 300);
+      if (r.status === 401 || r.status === 403) msg = 'authentication failed — check AOAI_KEY and AOAI_ENDPOINT.';
+      else if (r.status === 404) msg = 'deployment not found — check AOAI_DEPLOYMENT matches the model deployment name.';
+      else if (r.status === 429) msg = 'the model is rate-limited or out of quota right now — try again shortly.';
+      context.res = json({ error: true, answer: 'The assistant hit an error from Azure OpenAI (' + r.status + '): ' + msg });
+      return;
     }
-    if (id === 'nimbletags') {
-      const token = process.env.NIMBLE_ACCESS_TOKEN;
-      if (!token) { context.res = { status:500, body:'NIMBLE_ACCESS_TOKEN is not set.' }; return; }
-      context.res = { headers:{'Content-Type':'application/json'}, body: JSON.stringify(await getContactTags(token, { page })) }; return;
-    }
-    if (id === 'netsuite') {
-      context.res = { headers:{'Content-Type':'application/json'}, body: JSON.stringify(await getNetsuiteData({ page, from, to })) }; return;
-    }
-    if (id === 'autotask') {
-      // Device counts are written nightly to blob storage by an office-network
-      // job (the warehouse is IP-restricted, so neither the browser nor this
-      // function can query it directly). Lazy require keeps storage faults off
-      // the NetSuite / Nimble feeds above.
-      const { readJsonBlob } = require('../shared/store');
-      const data = await readJsonBlob('autotask-devices.json');
-      if (!data) { context.res = { status:404, body:'No Autotask sync file found yet. The office device has not written one.' }; return; }
-      context.res = { headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) }; return;
-    }
-    if (id === 'autotask-support') {
-      // Per-client ticket volume, worked hours and issue mix, written nightly by
-      // the same office job (automated/internal tickets already excluded).
-      const { readJsonBlob } = require('../shared/store');
-      const data = await readJsonBlob('autotask-support.json');
-      if (!data) { context.res = { status:404, body:'No Autotask support file found yet.' }; return; }
-      context.res = { headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) }; return;
-    }
-    if (id === 'autotask-owners') {
-      // Per-account sales owner (where the Autotask owner is a sales-team member)
-      // plus the technical owner, written by the office job.
-      const { readJsonBlob } = require('../shared/store');
-      const data = await readJsonBlob('autotask-owners.json');
-      if (!data) { context.res = { status:404, body:'No Autotask owners file found yet.' }; return; }
-      context.res = { headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) }; return;
-    }
-    if (id === 'autotask-tickets') {
-      // Per-site ticket cube (monthly counts, auto/user split, issue types, SLA,
-      // and per-engineer stats), written by the office tickets extract.
-      const { readJsonBlob } = require('../shared/store');
-      const data = await readJsonBlob('autotask-tickets.json');
-      if (!data) { context.res = { status:404, body:'No Autotask tickets file found yet.' }; return; }
-      context.res = { headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) }; return;
-    }
-    context.res = { status:404, body:`Unknown source '${id}'.` };
-  } catch (e) { context.res = { status:502, body:'Source fetch failed: ' + (e.message || String(e)) }; }
+    let j = null; try { j = text ? JSON.parse(text) : null; } catch (e) {}
+    const ans = (j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || '(no answer returned)';
+    context.res = json({ answer: ans });
+  } catch (e) {
+    const m = (e && e.name === 'AbortError') ? 'the request timed out.' : String(e && e.message || e);
+    context.res = json({ error: true, answer: 'Could not reach Azure OpenAI: ' + m });
+  } finally { clearTimeout(to); }
 };
