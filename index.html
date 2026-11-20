@@ -1327,6 +1327,7 @@ function renderC360(){
   const m365Rows=Object.entries(m.m365||{}).sort((a,b)=>b[1].s-a[1].s).map(([p,v])=>`<tr><td>${esc(p)}</td><td class="num">${v.s}</td><td>${v.l}</td></tr>`).join('');
   document.getElementById('pg-c360').innerHTML=`
   <h1 class="ph">Client <em>360</em></h1>
+  <div class="hint" style="margin:-2px 0 2px">${esc(m.n)}${clientId(m.n)?' · <span style="font-family:monospace;color:var(--blue)">'+esc(clientId(m.n))+'</span>':''}</div>
   <div style="margin:8px 0 14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
     <div class="fdrop"><input type="text" id="cPick" value="${esc(m.n)}" autocomplete="off" placeholder="Search clients…" style="width:340px;background:var(--panel);border:1px solid var(--line);color:#fff;border-radius:8px;padding:8px 12px"><div class="dd" id="cDD"></div></div>
     <select id="cSku" onchange="setC360Sku(this.value)" style="background:var(--panel);border:1px solid var(--line);color:#fff;border-radius:8px;padding:8px 12px;max-width:260px">
@@ -2938,12 +2939,12 @@ function renderAction(){
     <button class="btn ghost sm" onclick="actReport()">Download mismatch report</button>
   </div>
   <div class="panel"><div class="twrap" style="max-height:620px"><table id="actTable"><thead><tr>
-    <th>Client</th><th>Autotask</th><th>NetSuite</th><th>Nimble</th><th>Source of truth</th><th>Account manager</th><th>Status</th></tr></thead><tbody>
+    <th>Client &amp; ID</th><th>Autotask</th><th>NetSuite</th><th>Nimble</th><th>Source of truth</th><th>Account manager</th><th>Status</th></tr></thead><tbody>
   ${rows.map((r,i)=>{
     const atCell=r.at.length?esc(r.at.join(', ')):`<span style="display:flex;gap:4px"><input id="atm${i}" placeholder="link Autotask name" style="${istyle}"><button class="btn ghost sm" onclick="actMapName('atm${i}','${jsq(r.c)}')">map</button></span>`;
     const nimCell=!crmFeed()?'<span class="hint" style="margin:0">—</span>':(r.nimble?esc(r.nimble):`<span style="display:flex;gap:4px"><input id="nbm${i}" placeholder="link Nimble name" style="${istyle}"><button class="btn ghost sm" onclick="actMapName('nbm${i}','${jsq(r.c)}')">map</button></span>`);
     return `<tr data-n="${esc(r.c.toLowerCase())}">
-      <td class="clink" onclick="goClient('${jsq(r.c)}')">${esc(r.c)}${r.mism?` <span class="tag r" title="NetSuite ${esc(r.nsOwner||'—')} · Nimble ${esc(r.nimbleOwner||'—')} · Autotask ${esc(r.atOwner||'—')}">!</span>`:''}</td>
+      <td class="clink" onclick="goClient('${jsq(r.c)}')">${esc(r.c)}${clientId(r.c)?' <span style="font-family:monospace;color:var(--mut2);font-size:11px">'+esc(clientId(r.c))+'</span>':''}${r.mism?` <span class="tag r" title="NetSuite ${esc(r.nsOwner||'—')} · Nimble ${esc(r.nimbleOwner||'—')} · Autotask ${esc(r.atOwner||'—')}">!</span>`:''}</td>
       <td>${atCell}</td>
       <td>${esc(r.c)}</td>
       <td>${nimCell}</td>
@@ -4062,11 +4063,12 @@ function renderAssign(){
   crmAnalyse();
   const deals=allDeals();
   // --- roster roles (Nov 2026) ---
-  const POOL=['Michael Daly','Emil Badea','David Groark','David Flood','Simon Collins']; // eligible for new leads
+  // POOL (eligible for new leads) is derived below from the sales roster, so new joiners appear automatically
   const SIDELINE={ 'David McDonald':'Director of Sales — profile shown, not assigned leads',
                    'Eoghan Johnson':'Leaving soon — no new accounts',
                    "Derek O'Callaghan":'Leaving soon — no new accounts' };           // visible, never recommended
-  const HIDE=['Eamon Gallagher'];                                                      // MD — excluded entirely
+  const HIDE=['Eamon Gallagher'];
+  const POOL=[...SALES_SET].filter(n=>!SIDELINE[n]&&!HIDE.includes(n)).sort();                                                      // MD — excluded entirely
   // open pipeline attributed to the deal owner in Nimble (who is actively working it)
   const byOwner={}; deals.forEach(d=>{ const m=dealAM(d); (byOwner[m]=byOwner[m]||{n:0,v:0,w:0}); byOwner[m].n++; byOwner[m].v+=(+d.value||0); byOwner[m].w+=crmWeighted(d); });
   // client book per manager — from NetSuite ownership when present, else the Nimble tags
