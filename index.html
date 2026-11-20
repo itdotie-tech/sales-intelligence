@@ -1083,12 +1083,14 @@ function go(p,client){
   RENDER[p](); window.scrollTo({top:0});
 }
 function goClient(n){go('c360',n);}
+function fbarGroups(){ const mem={}; META.forEach(m=>{const g=groupOf(m.n); if(g&&cI[m.n]!=null){ (mem[g]=mem[g]||[]).push(cI[m.n]); }}); return Object.keys(mem).filter(g=>mem[g].length>=2&&!SITE_SPLIT[g]).map(g=>({name:g,idxs:mem[g]})).sort((a,b)=>b.idxs.length-a.idxs.length); }
 function buildFbar(){
   const el=document.getElementById('fbar'); if(!hasData){el.innerHTML='';return;}
   const sorted=[...META].sort((a,b)=>totMRR(b)-totMRR(a));
+  const grps=fbarGroups(); window._fbarGrp={}; grps.forEach(g=>window._fbarGrp[g.name]=g.idxs);
   el.innerHTML=`
     <select id="fOwner" title="Account manager"></select>
-    <select id="fClientSel" title="Pick a client"><option value="">All clients</option>${sorted.map(m=>`<option value="${cI[m.n]}">${esc(m.n)}</option>`).join('')}</select>
+    <select id="fClientSel" title="Pick a client"><option value="">All clients</option>${grps.map(g=>`<option value="g:${esc(g.name)}">▸ ${esc(g.name)} (${g.idxs.length} sites)</option>`).join('')}${sorted.map(m=>`<option value="${cI[m.n]}">${esc(m.n)}</option>`).join('')}</select>
     <div class="fdrop"><input type="text" id="fClient" placeholder="Search client…" autocomplete="off"><div class="dd" id="fClientDD"></div></div>
     <div class="vr"></div>
     <span class="chip" data-r="cur">Current</span><span class="chip" data-r="lastm">Last month</span>
@@ -1103,18 +1105,26 @@ function buildFbar(){
   rebuildOwnerFilter(); syncMonthInputs(); drawChips();
   document.getElementById('fOwner').onchange=e=>{state.owner=e.target.value;refresh();};
   document.getElementById('fClientSel').onchange=e=>{
-    if(e.target.value===''){state.sel=null;} else {state.sel=new Set([+e.target.value]); state.c360=C[+e.target.value];}
+    const v=e.target.value;
+    if(v===''){state.sel=null;}
+    else if(v.slice(0,2)==='g:'){ const idxs=(window._fbarGrp&&window._fbarGrp[v.slice(2)])||[]; state.sel=new Set(idxs); }
+    else {state.sel=new Set([+v]); state.c360=C[+v];}
     drawChips();
     if(state.page==='c360'){renderC360();} else refresh();
   };
   const cmp=document.getElementById('fCmp'); cmp.value=state.cmp; cmp.onchange=e=>{state.cmp=e.target.value;refresh();};
   const fc=document.getElementById('fClient'),dd=document.getElementById('fClientDD');
   fc.addEventListener('input',()=>{const q=fc.value.toLowerCase();if(!q){dd.style.display='none';return;}
+    const ghits=grps.filter(g=>g.name.toLowerCase().includes(q)).slice(0,6);
     const hits=sorted.filter(m=>m.n.toLowerCase().includes(q)).slice(0,25);
-    dd.innerHTML=hits.map(m=>`<div data-i="${cI[m.n]}">${esc(m.n)}<span style="float:right;color:var(--mut2)">${fmtEk(totMRR(m))}</span></div>`).join('')||'<div>No match</div>';
+    const html=ghits.map(g=>`<div data-g="${esc(g.name)}">▸ ${esc(g.name)}<span style="float:right;color:var(--mut2)">${g.idxs.length} sites</span></div>`).join('')+hits.map(m=>`<div data-i="${cI[m.n]}">${esc(m.n)}<span style="float:right;color:var(--mut2)">${fmtEk(totMRR(m))}</span></div>`).join('');
+    dd.innerHTML=html||'<div>No match</div>';
     dd.style.display='block';});
-  dd.addEventListener('mousedown',e=>{const d=e.target.closest('div[data-i]');if(!d)return;
-    state.sel=state.sel||new Set();state.sel.add(+d.dataset.i);fc.value='';dd.style.display='none';drawChips();refresh();});
+  dd.addEventListener('mousedown',e=>{const d=e.target.closest('div[data-i],div[data-g]');if(!d)return;
+    state.sel=state.sel||new Set();
+    if(d.dataset.g){ const idxs=(window._fbarGrp&&window._fbarGrp[d.dataset.g])||[]; idxs.forEach(i=>state.sel.add(i)); }
+    else { state.sel.add(+d.dataset.i); }
+    fc.value='';dd.style.display='none';drawChips();refresh();});
   ff.onchange=()=>{const i=M.indexOf(ff.value);if(i>=0){state.m0=Math.min(i,state.m1);clearChips();refresh();}};
   ft.onchange=()=>{const i=M.indexOf(ft.value);if(i>=0){state.m1=Math.max(i,state.m0);clearChips();refresh();}};
   el.querySelectorAll('.chip').forEach(ch=>ch.onclick=()=>{el.querySelectorAll('.chip').forEach(c=>c.classList.remove('on'));ch.classList.add('on');applyPreset(ch.dataset.r);syncMonthInputs();refresh();});
@@ -3076,6 +3086,7 @@ function atOwnerByClient(){
 function atSalesOwnerOf(n){ const e=atOwnerByClient()[n]; return (e&&e.sales)||null; }
 function techOwnerOf(n){ const e=atOwnerByClient()[n]; return (e&&e.tech)||''; }
 
+window.rkToggle=function(gi){ document.querySelectorAll('[data-rkg="'+gi+'"]').forEach(r=>{ r.style.display=(r.style.display==='none')?'':'none'; }); };
 function renderRisk(){
   const el=document.getElementById('pg-risk');
   if(!hasData){ el.innerHTML='<h1 class="ph">Profitability <em>&amp; Risk</em></h1><div class="note">Load the dashboard on the Data Hub first.</div>'; return; }
@@ -3095,6 +3106,24 @@ function renderRisk(){
   const cls=p=>p==null?'':(p<0?'neg':(p<30?'warn':'pos'));
   const pctT=p=>p==null?'—':p.toFixed(0)+'%';
   const noiseT=n=>n==null?'—':n.toFixed(1);
+  // multi-site rollup for the main margin table: group by name prefix when 2+ members and not split
+  const _pf={}; rows.forEach(r=>{const g=groupOf(r.m.n); if(g)_pf[g]=(_pf[g]||0)+1;});
+  const _gk=n=>{const g=groupOf(n); return (g&&_pf[g]>=2&&!SITE_SPLIT[g])?g:null;};
+  const _gm={}, _disp=[];
+  rows.forEach(r=>{ const k=_gk(r.m.n);
+    if(k){ let g=_gm[k]; if(!g){ g={isG:true,name:k,owner:ownerOf(k),members:[],dev:0,mit:0,rev:0,tickets:0,hB:0,hNB:0,hours:0,cost:0}; _gm[k]=g; _disp.push(g); }
+      g.members.push(r); g.dev+=r.dev; g.mit+=r.mit; g.rev+=r.rev; g.tickets+=r.tickets; g.hB+=r.hB; g.hNB+=r.hNB; g.hours+=r.hours; g.cost+=r.cost; }
+    else _disp.push({isG:false,r}); });
+  _disp.forEach(e=>{ if(e.isG){ e.margin=e.mit-e.cost; e.pct=e.mit>0?e.margin/e.mit*100:null; const an=months>0?e.mit/months*12:0; e.noise=an>0?e.hNB/(an/1000):null; } });
+  const _mval=e=>e.isG?e.margin:e.r.margin;
+  _disp.sort((a,b)=>_mval(a)-_mval(b));
+  const _cellRow=(r)=>`<td class="num">${r.dev||'—'}</td><td class="num">${fmtE(r.mit)}</td><td class="num">${fmtE(r.rev)}</td><td class="num">${r.tickets.toLocaleString()}</td><td class="num">${r.hB.toLocaleString()}</td><td class="num">${r.hNB.toLocaleString()}</td><td class="num">${r.hours.toLocaleString()}</td><td class="num">${fmtE(r.cost)}</td><td class="num ${r.margin<0?'neg':'pos'}">${fmtE(r.margin)}</td><td class="num ${cls(r.pct)}">${pctT(r.pct)}</td><td class="num ${r.noise!=null&&r.noise>8?'warn':''}">${noiseT(r.noise)}</td>`;
+  const mainRows=_disp.slice(0,90).map((e,gi)=>{
+    if(!e.isG){ const r=e.r; return `<tr><td class="clink" onclick="goClient('${jsq(r.m.n)}')">${esc(r.m.n)}</td><td>${esc(ownerOf(r.m.n))}</td>${_cellRow(r)}</tr>`; }
+    const head=`<tr class="clink" onclick="rkToggle(${gi})"><td>&#9656; ${esc(e.name)} <span class="hint" style="margin:0">(${e.members.length} sites)</span></td><td>${esc(e.owner)}</td>${_cellRow(e)}</tr>`;
+    const subs=e.members.slice().sort((a,b)=>a.margin-b.margin).map(r=>`<tr data-rkg="${gi}" style="display:none;background:rgba(255,255,255,.02)"><td class="clink" style="padding-left:22px" onclick="goClient('${jsq(r.m.n)}')">${esc(r.m.n)}</td><td>${esc(ownerOf(r.m.n))}</td>${_cellRow(r)}</tr>`).join('');
+    return head+subs;
+  }).join('');
   const pbtn=p=>`<button class="btn ${PERIOD===p?'':'ghost'} sm" onclick="setPeriod('${p}')">${PERIOD_LABEL[p]}</button>`;
   el.innerHTML=`
   <h1 class="ph">Profitability <em>&amp; Risk</em></h1>
@@ -3116,20 +3145,7 @@ function renderRisk(){
   <div class="panel"><h3>Lowest Managed IT margin — pricing attention</h3>
   <div class="hint">Worst managed-service margin first for <b>${PERIOD_LABEL[PERIOD].toLowerCase()}</b>. Negative means the non-billable support costs more than the Managed IT fee. A "—" margin % means there's support cost but no Managed IT line. Hours split <b>Billable</b> (charged on top) / <b>Non-bill</b> (the cost) / <b>Total</b>. High noise = many non-billable hours per €1k of Managed IT.</div>
   <div class="twrap" style="max-height:560px"><table><thead><tr><th>Client</th><th>Owner</th><th class="num">Devices</th><th class="num">Managed IT</th><th class="num">Overall rev</th><th class="num">Tickets</th><th class="num">Bill hrs</th><th class="num">Non-bill hrs</th><th class="num">Total hrs</th><th class="num">Cost</th><th class="num">MIT margin</th><th class="num">Margin %</th><th class="num">Noise</th></tr></thead><tbody>
-  ${rows.slice(0,90).map(r=>`<tr>
-    <td class="clink" onclick="goClient('${jsq(r.m.n)}')">${esc(r.m.n)}</td>
-    <td>${esc(ownerOf(r.m.n))}</td>
-    <td class="num">${r.dev||'—'}</td>
-    <td class="num">${fmtE(r.mit)}</td>
-    <td class="num">${fmtE(r.rev)}</td>
-    <td class="num">${r.tickets.toLocaleString()}</td>
-    <td class="num">${r.hB.toLocaleString()}</td>
-    <td class="num">${r.hNB.toLocaleString()}</td>
-    <td class="num">${r.hours.toLocaleString()}</td>
-    <td class="num">${fmtE(r.cost)}</td>
-    <td class="num ${r.margin<0?'neg':'pos'}">${fmtE(r.margin)}</td>
-    <td class="num ${cls(r.pct)}">${pctT(r.pct)}</td>
-    <td class="num ${r.noise!=null&&r.noise>8?'warn':''}">${noiseT(r.noise)}</td></tr>`).join('')}
+  ${mainRows}
   </tbody></table></div></div>
   <div class="two">
     <div class="panel"><h3>High-maintenance — highest noise</h3><div class="hint">Most non-billable support hours per €1k of Managed IT revenue. Re-price, review the contract, or fix a recurring root cause.</div>
