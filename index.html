@@ -3159,6 +3159,8 @@ function renderRisk(){
   _disp.forEach(e=>{ if(e.isG){ e.margin=e.mit-e.cost; e.pct=e.mit>0?e.margin/e.mit*100:null; const an=months>0?e.mit/months*12:0; e.noise=an>0?e.hNB/(an/1000):null; } });
   const _mval=e=>e.isG?e.margin:e.r.margin;
   _disp.sort((a,b)=>_mval(a)-_mval(b));
+  expReg('rkMargin','Managed IT margin by client ('+PERIOD_LABEL[PERIOD]+')',['Client','Account manager','Devices','Managed IT','Overall revenue','Tickets','Billable hrs','Non-billable hrs','Total hrs','Cost to serve','Margin','Margin %','Noise'],
+    _disp.map(e=>{ if(e.isG){ return [e.name+' ('+e.members.length+' sites)',e.owner,e.dev,Math.round(e.mit),Math.round(e.rev),e.tickets,e.hB,e.hNB,e.hours,Math.round(e.cost),Math.round(e.margin),e.pct!=null?Math.round(e.pct)+'%':'',e.noise!=null?e.noise.toFixed(1):'']; } const r=e.r; return [r.m.n,ownerOf(r.m.n),r.dev,Math.round(r.mit),Math.round(r.rev),r.tickets,r.hB,r.hNB,r.hours,Math.round(r.cost),Math.round(r.margin),r.pct!=null?Math.round(r.pct)+'%':'',r.noise!=null?r.noise.toFixed(1):'']; }));
   const _cellRow=(r)=>`<td class="num">${r.dev||'—'}</td><td class="num">${fmtE(r.mit)}</td><td class="num">${fmtE(r.rev)}</td><td class="num">${r.tickets.toLocaleString()}</td><td class="num">${r.hB.toLocaleString()}</td><td class="num">${r.hNB.toLocaleString()}</td><td class="num">${r.hours.toLocaleString()}</td><td class="num">${fmtE(r.cost)}</td><td class="num ${r.margin<0?'neg':'pos'}">${fmtE(r.margin)}</td><td class="num ${cls(r.pct)}">${pctT(r.pct)}</td><td class="num ${r.noise!=null&&r.noise>8?'warn':''}">${noiseT(r.noise)}</td>`;
   const mainRows=_disp.slice(0,90).map((e,gi)=>{
     if(!e.isG){ const r=e.r; return `<tr><td class="clink" onclick="goClient('${jsq(r.m.n)}')">${esc(r.m.n)}</td><td>${esc(ownerOf(r.m.n))}</td>${_cellRow(r)}</tr>`; }
@@ -3184,7 +3186,7 @@ function renderRisk(){
     <div class="card"><div class="k">Billable hours</div><div class="v">${Math.round(totB).toLocaleString()}</div><div class="s">recovered on timesheet · ${Math.round(totHrs).toLocaleString()} hrs total</div></div>
     <div class="card"><div class="k">Overall revenue</div><div class="v">${fmtE(totRev)}</div><div class="s">incl. ${fmtE(totOther)} other recurring</div></div>
   </div>
-  <div class="panel"><h3>Lowest Managed IT margin — pricing attention</h3>
+  <div class="panel"><h3>Lowest Managed IT margin — pricing attention ${expBar('rkMargin')}</h3>
   <div class="hint">Worst managed-service margin first for <b>${PERIOD_LABEL[PERIOD].toLowerCase()}</b>. Negative means the non-billable support costs more than the Managed IT fee. A "—" margin % means there's support cost but no Managed IT line. Hours split <b>Billable</b> (charged on top) / <b>Non-bill</b> (the cost) / <b>Total</b>. High noise = many non-billable hours per €1k of Managed IT.</div>
   <div class="twrap" style="max-height:560px"><table><thead><tr><th>Client</th><th>Owner</th><th class="num">Devices</th><th class="num">Managed IT</th><th class="num">Overall rev</th><th class="num">Tickets</th><th class="num">Bill hrs</th><th class="num">Non-bill hrs</th><th class="num">Total hrs</th><th class="num">Cost</th><th class="num">MIT margin</th><th class="num">Margin %</th><th class="num">Noise</th></tr></thead><tbody>
   ${mainRows}
@@ -3356,6 +3358,22 @@ window.exportReconcile=function(){
   for(const s of unmatched.sort()) out.push(['autotask_unmatched','','','','',s,atSales[s]||'']);
   dl(out.map(r=>r.map(q).join(',')).join('\n'),'itie-name-reconciliation.csv','text/csv');
 };
+/* ---- reusable export: Excel (.xlsx via SheetJS), Word (.doc), PDF (print view) ---- */
+function _escC(x){ return esc(String(x==null?'':x)); }
+function _expStyle(){ return '<style>body{font-family:Arial,Helvetica,sans-serif;color:#101e3b;padding:14px}h2{color:#101e3b;margin:0 0 2px}h3{color:#00608f;margin:14px 0 6px}.gen{color:#667;font-size:12px;margin-bottom:12px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #c7ced8;padding:5px 7px;font-size:12px;text-align:left}th{background:#101e3b;color:#fff}</style>'; }
+function _expDoc(title,inner){ return '<html><head><meta charset="utf-8"><title>'+_escC(title)+'</title>'+_expStyle()+'</head><body><h2>IT.ie Command Centre</h2><div class="gen">'+_escC(title)+' · generated '+new Date().toLocaleString('en-IE')+'</div>'+inner+'</body></html>'; }
+function _expWord(fn,doc){ const blob=new Blob(['﻿'+doc],{type:'application/msword'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=fn+'.doc'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),3000); }
+function _expPdf(doc){ const w=window.open('','_blank'); if(!w){ alert('Allow pop-ups for this site to export to PDF, then use your browser’s "Save as PDF".'); return; } w.document.open(); w.document.write(doc+'<scr'+'ipt>window.onload=function(){setTimeout(function(){window.print();},250);};<\/scr'+'ipt>'); w.document.close(); }
+function expReg(key,title,headers,rows){ window.__EXP=window.__EXP||{}; window.__EXP[key]={title,headers,rows}; }
+window.exportData=function(key,fmt){ const e=(window.__EXP||{})[key]; if(!e)return; const fn=(e.title||'export').replace(/[^\w]+/g,'_').slice(0,80);
+  if(fmt==='xlsx'){ try{ const ws=XLSX.utils.aoa_to_sheet([e.headers].concat(e.rows)); const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Data'); XLSX.writeFile(wb,fn+'.xlsx'); }catch(err){ alert('Excel export failed: '+(err&&err.message||err)); } return; }
+  const tbl='<table><thead><tr>'+e.headers.map(h=>'<th>'+_escC(h)+'</th>').join('')+'</tr></thead><tbody>'+e.rows.map(r=>'<tr>'+r.map(c=>'<td>'+_escC(c)+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
+  const doc=_expDoc(e.title,tbl); if(fmt==='word')_expWord(fn,doc); else if(fmt==='pdf')_expPdf(doc); };
+window.exportAsk=function(fmt){ const L=window.__askLast; if(!L)return; const ans=_escC(L.a).replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/\n/g,'<br>'); const inner='<h3>'+_escC(L.q)+'</h3><div>'+ans+'</div>'; const fn='report_'+String(L.q||'ask').replace(/[^\w]+/g,'_').slice(0,50); const doc=_expDoc('Ask report',inner); if(fmt==='word')_expWord(fn,doc); else if(fmt==='pdf')_expPdf(doc); };
+function expBar(key){ return '<span style="float:right;font-weight:400;font-size:11px">Export: '
+  +'<button class="btn sm ghost" onclick="event.stopPropagation();exportData(\''+key+'\',\'xlsx\')">Excel</button> '
+  +'<button class="btn sm ghost" onclick="event.stopPropagation();exportData(\''+key+'\',\'word\')">Word</button> '
+  +'<button class="btn sm ghost" onclick="event.stopPropagation();exportData(\''+key+'\',\'pdf\')">PDF</button></span>'; }
 function tkToDate(y){ return new Date(Math.floor(y/10000), Math.floor(y/100)%100-1, y%100); }
 function tkYmd(d){ return d.getFullYear()*10000+(d.getMonth()+1)*100+d.getDate(); }
 function tkFmtInput(y){ const s=''+y; return s.slice(0,4)+'-'+s.slice(4,6)+'-'+s.slice(6,8); }
@@ -3415,6 +3433,8 @@ function renderTickets(){
     const key=daily?(''+d):(''+Math.floor(d/100)); const bk=byBucket[key]=byBucket[key]||{user:0,auto:0}; if(au)bk.auto++; else bk.user++;
   }
   const gArr=Object.values(byG).sort((a,b)=>b.total-a.total);
+  expReg('tkClients','Tickets by client ('+tkFmtInput(R.from)+' to '+tkFmtInput(R.to)+')',['Client','Sites','Tickets','User','Auto','Hours','Reopened','Account manager'],
+    gArr.map(g=>[g.group,Object.keys(g.bySite).length,g.total,g.user,g.auto,Math.round(g.hours),g.reop,g.owner]));
   const typeArr=Object.values(byType).sort((a,b)=>b.total-a.total).slice(0,14);
   const srcArr=Object.values(bySrc).sort((a,b)=>b.total-a.total);
   const engArr=Object.values(byEng).sort((a,b)=>b.total-a.total).slice(0,14);
@@ -3452,7 +3472,7 @@ function renderTickets(){
     </div>
     <div class="hint" style="margin-top:8px"><b>Sources in range:</b> ${srcArr.map(s=>esc(s.name)+' '+nf(s.total)+(s.auto?(' ('+nf(s.auto)+' auto)'):'')).join(' &middot; ')||'&mdash;'}</div>
   </div>
-  <div class="panel"><h3>Clients by ticket volume</h3><div class="hint">Multi-site clients rolled up &mdash; click a client marked &#9656; to expand its sites. Reflects the date range and the top filters.</div>
+  <div class="panel"><h3>Clients by ticket volume ${expBar('tkClients')}</h3><div class="hint">Multi-site clients rolled up &mdash; click a client marked &#9656; to expand its sites. Reflects the date range and the top filters.</div>
     <div class="twrap" style="max-height:620px"><table><thead><tr><th>Client</th><th class="num">Sites</th><th class="num">Tickets</th><th class="num">User</th><th class="num">Auto</th><th class="num">Hours</th><th class="num">Reopened</th><th>Account manager</th></tr></thead><tbody>
     ${gArr.map((g,gi)=>{
       const siteN=Object.keys(g.bySite).length, multi=siteN>1;
@@ -3795,6 +3815,8 @@ async function askSend(){
     const r=await fetch('/api/ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q,context:askContext()})});
     const d=await r.json().catch(()=>({answer:'Sorry, I could not read the response.'}));
     thinking.innerHTML=askFmt(d.answer||'(no answer)');
+    window.__askLast={q:q,a:(d.answer||'')};
+    thinking.innerHTML+='<div style="margin-top:6px;font-size:11px;opacity:.85">Export answer: <button class="btn sm ghost" onclick="exportAsk(\'word\')">Word</button> <button class="btn sm ghost" onclick="exportAsk(\'pdf\')">PDF</button></div>';
   }catch(e){ thinking.innerHTML='Could not reach the assistant. '+esc(String(e&&e.message||e)); }
   finally{ _askBusy=false; if(b)b.disabled=false; const log=document.getElementById('askLog'); log.scrollTop=log.scrollHeight; }
 }
