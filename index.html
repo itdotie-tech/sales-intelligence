@@ -756,6 +756,8 @@ const DEFAULT_RENAME={'DSPCA':'NSPCA'};
 let CLIENT_RENAME={...DEFAULT_RENAME};
 let OWNER_ID_MAP_OVR={};
 let SITE_SPLIT={};
+let CLIENT_REG={};      // dashboard client registry: client name -> stable id (ITIE-00001)
+let SALES_ROSTER={};    // centrally-added sales members (name -> true), merged into SALES_SET
 let MAP_UPLOAD=null;
 try{
   const g=k=>{const v=localStorage.getItem(k);return v?JSON.parse(v):null;};
@@ -839,6 +841,7 @@ function bindData(){
   state.m0=Math.max(0,lastFullIdx-11);state.m1=lastFullIdx;
   mergeCRM();
   document.getElementById('gen').textContent='Loaded · to '+(DATA.maxDate||M[NM-1]);
+  if(window.__regReady&&typeof assignClientIds==='function'){ try{ assignClientIds(); }catch(e){} }
   renderSourceBadge();
 }
 const state={sel:null,owner:'',m0:0,m1:0,cmp:'none',page:'exec',c360:null};
@@ -868,7 +871,21 @@ const GROUP_RULES=[
   [/eastern electrical/i,'Emil Badea']
 ];
 /* The only owner names we accept — the sales team. Anything else → Unassigned. */
-const SALES_SET=new Set(['David Flood','David Groark','David McDonald',"Derek O'Callaghan",'Eoghan Johnson','Emil Badea','Michael Daly','Simon Collins']);
+const SALES_SET=new Set(['David Flood','David Groark','David McDonald',"Derek O'Callaghan",'Eoghan Johnson','Emil Badea','Michael Daly','Simon Collins','James Stack']);
+/* Canonical multi-site organisations — the single source of truth for rolling branches
+   up into one entity (top filter, Profitability & Risk, Tickets). Add a new group here as
+   one line. MS_BLOCK excludes names that look like a group but are not (e.g. Abacus, now
+   part of IT.ie — its companies are individual IT.ie clients, not an Abacus group). */
+const MS_GROUPS=[
+  ['EMEIS',/emeis/i],
+  ['EWL',/\bewl\b|eastern electrical/i],
+  ['Bright Motor Group',/bright\s*motor|\bbmg\b|\bbright\s+(ford|hyundai|vw|volkswagen|audi|seat|skoda|cupra|commercial|drive)\b/i],
+  ['Caremark',/caremark/i],
+  ['Greenman',/greenman/i],
+  ['Echelon',/echelon/i]
+];
+const MS_BLOCK=[/abacus/i];
+function msGroup(n){ if(!n)return null; for(const b of MS_BLOCK){ if(b.test(n)) return null; } for(const [label,re] of MS_GROUPS){ if(re.test(n)){ if(typeof SITE_SPLIT==='object'&&SITE_SPLIT&&SITE_SPLIT[label]) return null; return label; } } return null; }
 function groupOwner(n){ if(!n)return ''; for(const [re,who] of GROUP_RULES){ if(re.test(n)) return who; } if(GROUP_OWNER[n])return GROUP_OWNER[n]; const g=(typeof groupOf==='function')?groupOf(n):null; return (g&&GROUP_OWNER[g])||''; }
 /* Sales account manager for a client. Rules → Autotask sales owner → CRM/NetSuite
    owner, but only ever a sales-team name; otherwise Unassigned. Technical owners
@@ -1083,7 +1100,7 @@ function go(p,client){
   RENDER[p](); window.scrollTo({top:0});
 }
 function goClient(n){go('c360',n);}
-function fbarGroups(){ const mem={}; META.forEach(m=>{const g=groupOf(m.n); if(g&&cI[m.n]!=null){ (mem[g]=mem[g]||[]).push(cI[m.n]); }}); return Object.keys(mem).filter(g=>mem[g].length>=2&&!SITE_SPLIT[g]).map(g=>({name:g,idxs:mem[g]})).sort((a,b)=>b.idxs.length-a.idxs.length); }
+function fbarGroups(){ const mem={}; META.forEach(m=>{const g=msGroup(m.n); if(g&&cI[m.n]!=null){ (mem[g]=mem[g]||[]).push(cI[m.n]); }}); return Object.keys(mem).filter(g=>mem[g].length>=2).map(g=>({name:g,idxs:mem[g]})).sort((a,b)=>b.idxs.length-a.idxs.length); }
 function buildFbar(){
   const el=document.getElementById('fbar'); if(!hasData){el.innerHTML='';return;}
   const sorted=[...META].sort((a,b)=>totMRR(b)-totMRR(a));
@@ -2884,6 +2901,29 @@ function renderAction(){
   const mbtn=(m,l,n)=>`<button class="btn ${mode===m?'':'ghost'} sm" onclick="setActMode('${m}')">${l} · ${n}</button>`;
   const sstyle='background:var(--panel);border:1px solid var(--line);color:#fff;border-radius:6px;padding:5px 7px;font-size:12px';
   const istyle='width:150px;background:var(--navy2);border:1px solid var(--line);color:#fff;border-radius:6px;padding:4px 7px;font-size:12px';
+  const _newAMs=newAMsDetected(), _retired=retiredRegistry(), _roster=[...SALES_SET].sort();
+  const _withId=(typeof C!=='undefined'&&C)?C.filter(n=>CLIENT_REG[n]).length:0, _total=(typeof C!=='undefined'&&C)?C.length:0;
+  const _regPanel=`
+  <div class="panel"><h3>Client registry &amp; sales roster</h3>
+    <div class="hint">Every client gets a stable dashboard ID (ITIE-00001…), assigned automatically as new clients appear. The sales roster is the list of valid account managers — add a joiner and they show everywhere; remove a leaver to retire them.</div>
+    <div class="cards" style="margin:10px 0">
+      <div class="card"><div class="k">Client IDs assigned</div><div class="v">${_withId}/${_total}</div><div class="s">next: ITIE-${String(nextClientNum()+1).padStart(5,'0')}</div></div>
+      <div class="card ${_newAMs.length?'hl':''}"><div class="k">New account managers detected</div><div class="v ${_newAMs.length?'warn':''}">${_newAMs.length}</div><div class="s">in Autotask/CRM, not in the roster</div></div>
+      <div class="card ${_retired.length?'hl':''}"><div class="k">Registry mismatches</div><div class="v ${_retired.length?'warn':''}">${_retired.length}</div><div class="s">registered but not in current data</div></div>
+    </div>
+    <div class="two">
+      <div>
+        <div style="font-weight:600;margin-bottom:6px">Sales roster (${_roster.length})</div>
+        <div style="display:flex;gap:6px;margin-bottom:8px"><input id="rosterAdd" placeholder="Add account manager…" style="${istyle};width:200px"><button class="btn sm" onclick="(function(){var v=document.getElementById('rosterAdd').value;if(v)addSalesMember(v);})()">Add</button></div>
+        <div class="twrap" style="max-height:220px"><table><tbody>${_roster.map(n=>`<tr><td>${esc(n)}</td><td class="num">${SALES_ROSTER[n]?'<span class="hint" style="margin:0">added</span>':''}</td><td class="num"><span class="clink" onclick="removeSalesMember('${jsq(n)}')">remove</span></td></tr>`).join('')}</tbody></table></div>
+        ${_newAMs.length?`<div style="margin-top:8px"><div class="hint">Seen in the data (source of truth) — add if they are a sales AM:</div>${_newAMs.map(n=>`<span class="chip" style="cursor:pointer" onclick="addDetectedAM('${jsq(n)}')">+ ${esc(n)}</span>`).join(' ')}</div>`:''}
+      </div>
+      <div>
+        <div style="font-weight:600;margin-bottom:6px">Registry mismatches</div>
+        ${_retired.length?`<div class="hint">These have a dashboard ID but no longer appear in the data — likely renamed or offboarded. Clear the ID to retire it, or fix the name link in the table above.</div><div class="twrap" style="max-height:220px"><table><thead><tr><th>Client (registered)</th><th>ID</th><th></th></tr></thead><tbody>${_retired.map(n=>`<tr><td>${esc(n)}</td><td>${esc(CLIENT_REG[n])}</td><td class="num"><span class="clink" onclick="clearRegistryEntry('${jsq(n)}')">clear</span></td></tr>`).join('')}</tbody></table></div>`:'<div class="hint">No mismatches — every registered client is present in the current data.</div>'}
+      </div>
+    </div>
+  </div>`;
   el.innerHTML=`<h1 class="ph">Action <em>Centre</em></h1>
   <p class="psub">One place to reconcile identity and ownership across the three systems. Set each client's source of truth, link any name a stream can't match (e.g. DSPCA → NSPCA after a rename), and assign the account manager. Every change saves ${CENTRAL_META.synced?'centrally for the team':'<b>locally only (central store not connected)</b>'}. Run the mismatch report monthly to catch where the streams drift apart.</p>
   <div class="cards">
@@ -2911,7 +2951,8 @@ function renderAction(){
       <td><select onchange="actSetOwner('${jsq(r.c)}',this.value)" style="${sstyle}${r.owner==='Unassigned'?';border-color:#e5484d':''}">${amOpts(r.owner)}</select></td>
       <td>${r.mism?'<span class="warn">mismatch</span>':r.unmatched?'<span class="hint" style="margin:0">unmatched</span>':'<span class="pos">ok</span>'}</td>
     </tr>`;}).join('')}
-  </tbody></table></div></div>`;
+  </tbody></table></div></div>
+  ${_regPanel}`;
 }
 
 function rebuildFromCache(){
@@ -3107,8 +3148,8 @@ function renderRisk(){
   const pctT=p=>p==null?'—':p.toFixed(0)+'%';
   const noiseT=n=>n==null?'—':n.toFixed(1);
   // multi-site rollup for the main margin table: group by name prefix when 2+ members and not split
-  const _pf={}; rows.forEach(r=>{const g=groupOf(r.m.n); if(g)_pf[g]=(_pf[g]||0)+1;});
-  const _gk=n=>{const g=groupOf(n); return (g&&_pf[g]>=2&&!SITE_SPLIT[g])?g:null;};
+  const _pf={}; rows.forEach(r=>{const g=msGroup(r.m.n); if(g)_pf[g]=(_pf[g]||0)+1;});
+  const _gk=n=>{const g=msGroup(n); return (g&&_pf[g]>=2)?g:null;};
   const _gm={}, _disp=[];
   rows.forEach(r=>{ const k=_gk(r.m.n);
     if(k){ let g=_gm[k]; if(!g){ g={isG:true,name:k,owner:ownerOf(k),members:[],dev:0,mit:0,rev:0,tickets:0,hB:0,hNB:0,hours:0,cost:0}; _gm[k]=g; _disp.push(g); }
@@ -3344,7 +3385,8 @@ function renderTickets(){
   if(!T._site){ let X=null,ix=null; try{ X=mapIndex(); ix=PIPE.buildIndex(C); }catch(e){}
     const pc={}; T.sites.forEach(nm=>{ const i=nm.indexOf(' - '); if(i>0){ const p=nm.slice(0,i).trim(); pc[p]=(pc[p]||0)+1; } });
     T._site=T.sites.map(nm=>{ let cli=null; if(X&&ix){ try{ const r=_resolveSite(nm,X,ix); if(r&&r!=='__skip__') cli=r; }catch(e){} }
-      let group=cli; if(!group){ const i=nm.indexOf(' - '); group=(i>0&&pc[nm.slice(0,i).trim()]>=2)?nm.slice(0,i).trim():nm; }
+      let group=msGroup(nm)||(cli&&msGroup(cli))||cli;
+      if(!group){ const i=nm.indexOf(' - '); const pfx=i>0?nm.slice(0,i).trim():''; group=(pfx&&pc[pfx]>=2&&!MS_BLOCK.some(b=>b.test(pfx)))?pfx:nm; }
       let owner='Unassigned'; try{ owner=ownerOf(group)||'Unassigned'; }catch(e){}
       return {name:nm,client:cli,group,owner}; });
   }
@@ -3464,6 +3506,8 @@ async function loadCentralOverrides(){
     if(d.clientRenames&&d.clientRenames['__matchNotes__']!=null){ window.__matchNotes=d.clientRenames['__matchNotes__']; }
     Object.assign(OWNER_ID_MAP_OVR, d.ownerIdMap||{});
     Object.assign(SOT_OVR, d.sourceOfTruth||{});
+    { const cr=d.clientRegistry||{}; Object.keys(cr).forEach(k=>{ if(cr[k])CLIENT_REG[k]=cr[k]; else delete CLIENT_REG[k]; }); }
+    { const sr=d.salesRoster||{}; Object.keys(sr).forEach(k=>{ if(sr[k]){SALES_SET.add(k);SALES_ROSTER[k]=true;} else {SALES_SET.delete(k);delete SALES_ROSTER[k];} }); }
     if(d.siteSplits&&typeof d.siteSplits==='object'){ Object.keys(d.siteSplits).forEach(k=>{ if(d.siteSplits[k])SITE_SPLIT[k]=true; else delete SITE_SPLIT[k]; }); try{localStorage.setItem('itie3_split',JSON.stringify(SITE_SPLIT));}catch(e){} }
     CENTRAL_META={updatedAt:d.updatedAt||null,updatedBy:d.updatedBy||null,synced:true};
     try{ localStorage.setItem('itie3_owner',JSON.stringify(OWNER_OVR));
@@ -3480,6 +3524,31 @@ async function pushOverride(patch){
     return {ok:false,reason:'error'};
   }catch(e){ return {ok:false,reason:'offline'}; }
 }
+/* ---- client registry (stable dashboard IDs) + sales-roster helpers ---- */
+function clientId(nm){ return CLIENT_REG[nm]||''; }
+function nextClientNum(){ let mx=0; for(const v of Object.values(CLIENT_REG)){ const m=/ITIE-(\d+)/.exec(v||''); if(m){ const n=+m[1]; if(n>mx)mx=n; } } return mx; }
+function assignClientIds(){
+  if(typeof C==='undefined'||!Array.isArray(C)||!C.length) return {};
+  let c=nextClientNum(); const delta={};
+  C.forEach(nm=>{ if(nm&&!CLIENT_REG[nm]){ c++; const id='ITIE-'+String(c).padStart(5,'0'); CLIENT_REG[nm]=id; delta[nm]=id; } });
+  if(Object.keys(delta).length){ try{ pushOverride({clientRegistry:delta}); }catch(e){} }
+  return delta;
+}
+// account-manager names seen in the live feeds (Autotask = source of truth) that aren't in the roster yet
+function newAMsDetected(){
+  const seen=new Set(); const canon=x=>(typeof canonAM==='function')?canonAM(x||''):(x||'');
+  if(typeof META!=='undefined'&&Array.isArray(META)){ META.forEach(m=>{
+    const a=(typeof atSalesOwnerOf==='function')?atSalesOwnerOf(m.n):null; const ca=canon(a); if(ca)seen.add(ca);
+    const cm=canon((m.ownerFinal||m.owner)||''); if(cm)seen.add(cm);
+  }); }
+  const out=[]; seen.forEach(n=>{ if(n&&n!=='Unassigned'&&!SALES_SET.has(n)) out.push(n); }); return out.sort();
+}
+// registered clients that are no longer in the current data (likely renamed or offboarded)
+function retiredRegistry(){ const active=new Set((typeof C!=='undefined'&&Array.isArray(C))?C:[]); return Object.keys(CLIENT_REG).filter(k=>!active.has(k)).sort(); }
+window.addSalesMember=function(nm){ nm=(nm||'').trim(); if(!nm)return; SALES_SET.add(nm); SALES_ROSTER[nm]=true; pushOverride({salesRoster:{[nm]:true}}).then(()=>{ if(typeof bindData==='function')bindData(); if(state.page==='action')renderAction(); if(typeof rebuildOwnerFilter==='function')rebuildOwnerFilter(); }); };
+window.removeSalesMember=function(nm){ SALES_SET.delete(nm); delete SALES_ROSTER[nm]; pushOverride({salesRoster:{[nm]:null}}).then(()=>{ if(state.page==='action')renderAction(); if(typeof rebuildOwnerFilter==='function')rebuildOwnerFilter(); }); };
+window.clearRegistryEntry=function(nm){ delete CLIENT_REG[nm]; pushOverride({clientRegistry:{[nm]:null}}).then(()=>{ if(state.page==='action')renderAction(); }); };
+window.addDetectedAM=function(nm){ window.addSalesMember(nm); };
 
 function crmFeed(){ for(const k of Object.keys(SOURCE_DATA)){ const d=SOURCE_DATA[k]&&SOURCE_DATA[k].data; if(d&&Array.isArray(d.accounts)) return d; } return null; }
 function hasCrm(){ return !!crmFeed(); }
@@ -3763,7 +3832,7 @@ function askContext(){
           const dd=new Date(Math.floor(dmax/10000),Math.floor(dmax/100)%100-1,dmax%100); dd.setMonth(dd.getMonth()-12);
           const from=dd.getFullYear()*10000+(dd.getMonth()+1)*100+dd.getDate();
           const pcT={}; T.sites.forEach(nm=>{const i=nm.indexOf(' - ');if(i>0){const p=nm.slice(0,i).trim();pcT[p]=(pcT[p]||0)+1;}});
-          const grp=T.sites.map(nm=>{const i=nm.indexOf(' - ');const g=(i>0&&pcT[nm.slice(0,i).trim()]>=2)?nm.slice(0,i).trim():nm; let ow='Unassigned'; try{ow=ownerOf(g)||'Unassigned';}catch(e){} return {g,ow};});
+          const grp=T.sites.map(nm=>{let g=msGroup(nm); if(!g){const i=nm.indexOf(' - ');const pfx=i>0?nm.slice(0,i).trim():'';g=(pfx&&pcT[pfx]>=2&&!MS_BLOCK.some(b=>b.test(pfx)))?pfx:nm;} let ow='Unassigned'; try{ow=ownerOf(g)||'Unassigned';}catch(e){} return {g,ow};});
           const types=T.types||[];
           let tt=0,tu=0,ta=0,th=0; const byC={},byT={},mA={};
           for(const r of T.tickets){ if(r[0]<from)continue; const gg=grp[r[1]]; if(!gg)continue; const au=r[2];
@@ -4183,7 +4252,7 @@ function renderRecon(){
 function refresh(){if(!hasData&&state.page!=='pkg'&&state.page!=='diag'&&state.page!=='match'&&state.page!=='ownermap'&&state.page!=='action'&&state.page!=='multisite'&&!(['crm','recon','pipeline','leads','assign'].includes(state.page)&&hasCrm())){renderData();return;}RENDER[state.page]();}
 (function ensureAutotaskSource(){ try{ const list=getSources(); if(!list.some(s=>s.id==='autotask')){ list.push({id:'autotask',label:'Autotask — device estate',url:'/api/getSource/autotask',role:'secondary'}); saveSources(list); } }catch(e){} })();
 bindData();buildNav();
-loadCentralOverrides().then(loaded=>{ if(loaded){ if(hasData){ bindData(); buildNav(); rebuildOwnerFilter(); } if(state.page)refresh(); } });
+loadCentralOverrides().then(loaded=>{ window.__regReady=true; if(loaded){ if(hasData){ bindData(); buildNav(); rebuildOwnerFilter(); } if(state.page)refresh(); } else if(hasData&&typeof assignClientIds==='function'){ try{ assignClientIds(); }catch(e){} } });
 /* Autotask device counts come from a JSON file a job writes to blob storage
    (the warehouse is IP-restricted, so this reads the synced snapshot, not the
    warehouse). Populates window.DEVICE_COUNTS before the build so every device
